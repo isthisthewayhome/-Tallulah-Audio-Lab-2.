@@ -4,6 +4,10 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.content.Intent;
 import android.media.MediaPlayer;
+import android.media.ToneGenerator;
+import android.media.AudioManager;
+import android.os.Handler;
+import android.os.Looper;
 import android.net.Uri;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -18,6 +22,12 @@ public class MainActivity extends Activity {
   private LinearLayout trackList;
   private TextView status;
   private boolean playing = false;
+  private final Handler rhythmHandler = new Handler(Looper.getMainLooper());
+  private ToneGenerator rhythmTone;
+  private boolean rhythmEnabled=false;
+  private int rhythmBpm=40, rhythmVolume=30, rhythmPattern=0, rhythmTick=0;
+  private TextView rhythmStatus;
+  private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)rhythmTone.startTone(ToneGenerator.TONE_PROP_BEEP,75);}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,rhythmBpm+(int)(20*Math.sin(rhythmTick/5.0)));if(rhythmPattern==2)bpm=Math.min(120,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText("Rhythm guide • "+bpm+" BPM • audible cue");rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
   private final int bg = Color.rgb(16,13,24), panel = Color.rgb(34,25,45), accent = Color.rgb(187,115,213);
   private static class Track {
     MediaPlayer player; Uri uri; SeekBar volume; CheckBox loop; TextView label; boolean muted=false, solo=false;
@@ -51,6 +61,22 @@ public class MainActivity extends Activity {
     root.addView(add);
     Button video=button("▣ Extract audio from video");root.addView(video);video.setOnClickListener(v->status.setText("Video extraction is not available in this build yet."));
     trackList=new LinearLayout(this);trackList.setOrientation(1);root.addView(trackList);
+    TextView beatTitle=text("Binaural beat generator",24,true);beatTitle.setPadding(0,28,0,8);root.addView(beatTitle);
+    LinearLayout rhythmCard=new LinearLayout(this);rhythmCard.setOrientation(1);rhythmCard.setPadding(20,20,20,20);
+    GradientDrawable rhythmBg=new GradientDrawable();rhythmBg.setColor(0xff1e1e32);rhythmBg.setCornerRadius(28);rhythmCard.setBackground(rhythmBg);root.addView(rhythmCard);
+    TextView rhythmHeading=text("HISMITH STROKE RHYTHM",18,true);rhythmHeading.setTextColor(0xffb497ff);rhythmCard.addView(rhythmHeading);
+    TextView rhythmDesc=text("Audible timing guide only. Does not connect to or control a device.",13,false);rhythmCard.addView(rhythmDesc);
+    rhythmStatus=text("Rhythm guide stopped",14,false);rhythmStatus.setPadding(0,14,0,8);rhythmCard.addView(rhythmStatus);
+    Button rhythmToggle=button("▶ Start rhythm guide");rhythmCard.addView(rhythmToggle);
+    rhythmToggle.setOnClickListener(v->{rhythmEnabled=!rhythmEnabled;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmEnabled){rhythmTick=0;resetRhythmTone();rhythmHandler.post(rhythmTask);rhythmToggle.setText("■ Stop rhythm guide");}else{rhythmToggle.setText("▶ Start rhythm guide");rhythmStatus.setText("Rhythm guide stopped");}});
+    TextView tempo=text("Tempo • 40 BPM",14,false);rhythmCard.addView(tempo);
+    SeekBar tempoSlider=new SeekBar(this);tempoSlider.setMax(105);tempoSlider.setProgress(25);rhythmCard.addView(tempoSlider);
+    tempoSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){rhythmBpm=p+15;tempo.setText("Tempo • "+rhythmBpm+" BPM");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+    TextView loud=text("Guide volume • 30%",14,false);rhythmCard.addView(loud);
+    SeekBar loudSlider=new SeekBar(this);loudSlider.setMax(100);loudSlider.setProgress(30);rhythmCard.addView(loudSlider);
+    loudSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){rhythmVolume=p;loud.setText("Guide volume • "+p+"%");if(rhythmEnabled)resetRhythmTone();}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+    Spinner patterns=new Spinner(this);String[] names={"Steady pulse","Wave • rise and fall","Build • gradual acceleration"};ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);patterns.setAdapter(adapter);rhythmCard.addView(patterns);
+    patterns.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){rhythmPattern=position;rhythmTick=0;}public void onNothingSelected(android.widget.AdapterView<?> parent){}});
     TextView foot=text("Binaural beats, clip editing, project export, and Govee lighting are being rebuilt. These features are not active yet.",13,false);foot.setTextColor(0xffb7a5be);foot.setPadding(0,28,0,0);root.addView(foot);
   }
   private TextView text(String s,int size,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.WHITE);if(bold)t.setTypeface(null,Typeface.BOLD);return t;}
@@ -95,5 +121,6 @@ public class MainActivity extends Activity {
   private boolean hasSolo(){for(Track t:tracks)if(t.solo)return true;return false;}
   private void updateVolumes(){boolean any=hasSolo();for(Track t:tracks){float v=(t.muted||(any&&!t.solo))?0:t.volume.getProgress()/100f;try{t.player.setVolume(v,v);}catch(Exception ignored){}}}
   private void seekAll(int delta){for(Track t:tracks){int target=Math.max(0,Math.min(t.player.getDuration(),t.player.getCurrentPosition()+delta));t.player.seekTo(target);}}
-  @Override protected void onDestroy(){for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
+  private void resetRhythmTone(){if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}if(rhythmVolume>0)rhythmTone=new ToneGenerator(AudioManager.STREAM_MUSIC,Math.max(1,rhythmVolume));}
+  @Override protected void onDestroy(){rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
 }
