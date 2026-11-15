@@ -29,6 +29,10 @@ public class MainActivity extends Activity {
   private boolean rhythmEnabled=false;
   private int rhythmBpm=40, rhythmVolume=30, rhythmPunch=100, rhythmPattern=0, rhythmTick=0;
   private TextView rhythmStatus;
+  private AudioTrack atmosphereTrack;
+  private Thread atmosphereThread;
+  private volatile boolean atmosphereOn=false, stereoOn=false;
+  private volatile int atmosphereType=0, atmosphereVolume=20, stereoVolume=25, stereoBeat=6, stereoCarrier=180;
   private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,Math.min(400,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));if(rhythmPattern==2)bpm=Math.min(400,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText("Rhythm guide • "+bpm+" BPM • audible cue");rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
   private final int bg = Color.rgb(16,13,24), panel = Color.rgb(34,25,45), accent = Color.rgb(187,115,213);
   private static class Track {
@@ -82,7 +86,36 @@ public class MainActivity extends Activity {
     punchSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){rhythmPunch=p;punchLabel.setText("Bass Punch • "+p+"%");if(rhythmEnabled)resetRhythmTone();}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
     Spinner patterns=new Spinner(this);String[] names={"Steady pulse","Wave • rise and fall","Build • gradual acceleration"};ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);patterns.setAdapter(adapter);rhythmCard.addView(patterns);
     patterns.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){rhythmPattern=position;rhythmTick=0;}public void onNothingSelected(android.widget.AdapterView<?> parent){}});
-    TextView foot=text("Binaural beats, clip editing, project export, and Govee lighting are being rebuilt. These features are not active yet.",13,false);foot.setTextColor(0xffb7a5be);foot.setPadding(0,28,0,0);root.addView(foot);
+
+    TextView binauralTitle=text("Stereo binaural beat generator",23,true);binauralTitle.setPadding(0,26,0,10);root.addView(binauralTitle);
+    LinearLayout binCard=new LinearLayout(this);binCard.setOrientation(1);binCard.setPadding(20,20,20,20);
+    GradientDrawable binShape=new GradientDrawable();binShape.setColor(0xff1e1e32);binShape.setCornerRadius(24);binCard.setBackground(binShape);root.addView(binCard);
+    CheckBox stereoSwitch=new CheckBox(this);stereoSwitch.setText("Enable stereo tones");stereoSwitch.setTextColor(Color.WHITE);binCard.addView(stereoSwitch);
+    stereoSwitch.setOnCheckedChangeListener((b,on)->{stereoOn=on;startAtmosphereIfNeeded();});
+    String[] names={"Deep Rest • 2 Hz","Dreamy • 6 Hz","Calm • 10 Hz","Focused • 18 Hz","Energized • 36 Hz","Intimate • 7 Hz","Custom"};
+    Spinner vibe=new Spinner(this);vibe.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,names));binCard.addView(vibe);
+    TextView beatLabel=text("Beat difference • 6 Hz",14,false);binCard.addView(beatLabel);
+    SeekBar beatSlider=new SeekBar(this);beatSlider.setMax(39);beatSlider.setProgress(5);binCard.addView(beatSlider);
+    beatSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){stereoBeat=p+1;beatLabel.setText("Beat difference • "+stereoBeat+" Hz");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+    vibe.setSelection(1);vibe.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){int[] presets={2,6,10,18,36,7};if(pos<6)beatSlider.setProgress(presets[pos]-1);}public void onNothingSelected(android.widget.AdapterView<?> p){}});
+    TextView carrierLabel=text("Carrier • 180 Hz",14,false);binCard.addView(carrierLabel);
+    SeekBar carrierSlider=new SeekBar(this);carrierSlider.setMax(350);carrierSlider.setProgress(100);binCard.addView(carrierSlider);
+    carrierSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){stereoCarrier=p+80;carrierLabel.setText("Carrier • "+stereoCarrier+" Hz");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+    TextView stereoVol=text("Tone volume • 25%",14,false);binCard.addView(stereoVol);
+    SeekBar stereoSlider=new SeekBar(this);stereoSlider.setMax(100);stereoSlider.setProgress(25);binCard.addView(stereoSlider);
+    stereoSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){stereoVolume=p;stereoVol.setText("Tone volume • "+p+"%");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+    TextView dreamTitle=text("Dream Sounds",23,true);dreamTitle.setPadding(0,26,0,10);root.addView(dreamTitle);
+    LinearLayout dreamCard=new LinearLayout(this);dreamCard.setOrientation(1);dreamCard.setPadding(20,20,20,20);
+    GradientDrawable dreamShape=new GradientDrawable();dreamShape.setColor(0xff1e1e32);dreamShape.setCornerRadius(24);dreamCard.setBackground(dreamShape);root.addView(dreamCard);
+    Spinner dreamPicker=new Spinner(this);dreamPicker.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Dark Drone","Ocean Drift","Airy Whisper","Soft Night Pulse"}));dreamCard.addView(dreamPicker);
+    dreamPicker.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){atmosphereType=pos;}public void onNothingSelected(android.widget.AdapterView<?> p){}});
+    TextView dreamVol=text("Dream volume • 20%",14,false);dreamCard.addView(dreamVol);
+    SeekBar dreamSlider=new SeekBar(this);dreamSlider.setMax(100);dreamSlider.setProgress(20);dreamCard.addView(dreamSlider);
+    dreamSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){atmosphereVolume=p;dreamVol.setText("Dream volume • "+p+"%");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+    Button dreamButton=button("▶ Start Dream Sounds");dreamCard.addView(dreamButton);
+    dreamButton.setOnClickListener(v->{atmosphereOn=!atmosphereOn;startAtmosphereIfNeeded();dreamButton.setText(atmosphereOn?"■ Stop Dream Sounds":"▶ Start Dream Sounds");});
+    dreamCard.addView(text("Synthesized sound textures. Use stereo headphones for binaural tones.",12,false));
+    TextView foot=text("Clip editing, export, and Govee lighting are still being rebuilt.",13,false);foot.setTextColor(0xffb7a5be);foot.setPadding(0,28,0,0);root.addView(foot);
   }
   private TextView text(String s,int size,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.WHITE);if(bold)t.setTypeface(null,Typeface.BOLD);return t;}
   private Button button(String s){Button b=new Button(this);b.setText(s);b.setTextColor(Color.WHITE);b.setAllCaps(false);b.setTextSize(13);b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff5b346c));return b;}
@@ -126,6 +159,41 @@ public class MainActivity extends Activity {
   private boolean hasSolo(){for(Track t:tracks)if(t.solo)return true;return false;}
   private void updateVolumes(){boolean any=hasSolo();for(Track t:tracks){float v=(t.muted||(any&&!t.solo))?0:t.volume.getProgress()/100f;try{t.player.setVolume(v,v);}catch(Exception ignored){}}}
   private void seekAll(int delta){for(Track t:tracks){int target=Math.max(0,Math.min(t.player.getDuration(),t.player.getCurrentPosition()+delta));t.player.seekTo(target);}}
+
+  private synchronized void startAtmosphereIfNeeded(){
+    if(atmosphereThread!=null||(!atmosphereOn&&!stereoOn))return;
+    atmosphereThread=new Thread(()->{
+      AudioTrack output=null;
+      try{
+        int rate=22050,n=1024;
+        output=new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()).setAudioFormat(new AudioFormat.Builder().setSampleRate(rate).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build()).setBufferSizeInBytes(n*16).setTransferMode(AudioTrack.MODE_STREAM).build();
+        atmosphereTrack=output;output.play();short[] pcm=new short[n*2];long index=0;
+        while(atmosphereOn||stereoOn){
+          for(int i=0;i<n;i++,index++){
+            double t=index/(double)rate,l=0,r=0;
+            if(stereoOn){double g=stereoVolume/500.0;l=g*Math.sin(2*Math.PI*stereoCarrier*t);r=g*Math.sin(2*Math.PI*(stereoCarrier+stereoBeat)*t);}
+            if(atmosphereOn){
+              double w=0;
+              switch(atmosphereType){
+                case 0:w=0.6*Math.sin(2*Math.PI*65*t)+0.3*Math.sin(2*Math.PI*97*t);break;
+                case 1:w=(0.4+0.3*Math.sin(2*Math.PI*0.08*t))*Math.sin(2*Math.PI*135*t);break;
+                case 2:w=0.35*Math.sin(2*Math.PI*330*t+2*Math.sin(2*Math.PI*0.2*t));break;
+                default:w=Math.pow(Math.max(0,Math.sin(2*Math.PI*1.2*t)),8)*Math.sin(2*Math.PI*90*t);break;
+              }
+              l+=w*atmosphereVolume/300.0;r+=w*atmosphereVolume/300.0;
+            }
+            pcm[2*i]=(short)(Math.max(-1,Math.min(1,l))*24000);
+            pcm[2*i+1]=(short)(Math.max(-1,Math.min(1,r))*24000);
+          }
+          output.write(pcm,0,pcm.length);
+        }
+      }catch(Exception ignored){}finally{
+        if(output!=null){try{output.stop();}catch(Exception ignored){}output.release();}
+        atmosphereTrack=null;atmosphereThread=null;
+      }
+    },"DreamAudio");
+    atmosphereThread.start();
+  }
   private void resetRhythmTone(){
     if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}
     if(rhythmVolume<=0)return;
@@ -149,5 +217,5 @@ public class MainActivity extends Activity {
     if(rhythmTone==null)return;
     try{rhythmTone.pause();rhythmTone.setPlaybackHeadPosition(0);rhythmTone.play();}catch(Exception ignored){}
   }
-  @Override protected void onDestroy(){rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
+  @Override protected void onDestroy(){atmosphereOn=false;stereoOn=false;rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
 }
