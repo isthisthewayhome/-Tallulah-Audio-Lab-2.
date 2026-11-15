@@ -91,9 +91,9 @@ public class MainActivity extends Activity {
     LinearLayout binCard=new LinearLayout(this);binCard.setOrientation(1);binCard.setPadding(20,20,20,20);
     GradientDrawable binShape=new GradientDrawable();binShape.setColor(0xff1e1e32);binShape.setCornerRadius(24);binCard.setBackground(binShape);root.addView(binCard);
     CheckBox stereoSwitch=new CheckBox(this);stereoSwitch.setText("Enable stereo tones");stereoSwitch.setTextColor(Color.WHITE);binCard.addView(stereoSwitch);
-    stereoSwitch.setOnCheckedChangeListener((b,on)->{stereoOn=on;startAtmosphereIfNeeded();});
-    String[] names={"Deep Rest • 2 Hz","Dreamy • 6 Hz","Calm • 10 Hz","Focused • 18 Hz","Energized • 36 Hz","Intimate • 7 Hz","Custom"};
-    Spinner vibe=new Spinner(this);vibe.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,names));binCard.addView(vibe);
+    stereoSwitch.setOnCheckedChangeListener((stereoButton,on)->{stereoOn=on;startAtmosphereIfNeeded();});
+    String[] binauralPresetNames={"Deep Rest • 2 Hz","Dreamy • 6 Hz","Calm • 10 Hz","Focused • 18 Hz","Energized • 36 Hz","Intimate • 7 Hz","Custom"};
+    Spinner vibe=new Spinner(this);vibe.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,binauralPresetNames));binCard.addView(vibe);
     TextView beatLabel=text("Beat difference • 6 Hz",14,false);binCard.addView(beatLabel);
     SeekBar beatSlider=new SeekBar(this);beatSlider.setMax(39);beatSlider.setProgress(5);binCard.addView(beatSlider);
     beatSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){stereoBeat=p+1;beatLabel.setText("Beat difference • "+stereoBeat+" Hz");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
