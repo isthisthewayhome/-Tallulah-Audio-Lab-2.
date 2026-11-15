@@ -20,7 +20,7 @@ public class MainActivity extends Activity {
   private boolean playing = false;
   private final int bg = Color.rgb(16,13,24), panel = Color.rgb(34,25,45), accent = Color.rgb(187,115,213);
   private static class Track {
-    MediaPlayer player; Uri uri; SeekBar volume; CheckBox loop; TextView label;
+    MediaPlayer player; Uri uri; SeekBar volume; CheckBox loop; TextView label; boolean muted=false, solo=false;
     Track(MediaPlayer p,Uri u){player=p;uri=u;}
   }
   @Override public void onCreate(Bundle b){
@@ -29,22 +29,29 @@ public class MainActivity extends Activity {
     getWindow().setNavigationBarColor(bg);
     ScrollView scroll = new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(bg);
     LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setPadding(24,30,24,24);scroll.addView(root);setContentView(scroll);
-    TextView heading=text("TALLULAH",28,true);heading.setTextColor(accent);root.addView(heading);
-    TextView sub=text("AUDIO LAB 3.0  •  NATIVE ALPHA",13,false);sub.setTextColor(0xffc6a6cf);root.addView(sub);
-    TextView info=text("Load audio from your phone. Each track has independent volume and looping.",15,false);info.setPadding(0,22,0,18);root.addView(info);
-    Button add=button("＋  ADD AUDIO TRACK");root.addView(add);
+    TextView eyebrow=text("Y O U R   P R I V A T E   S O U N D   S T U D I O",13,true);eyebrow.setTextColor(accent);root.addView(eyebrow);
+    TextView heading=text("Tallulah Audio Lab",30,true);heading.setTextColor(Color.WHITE);root.addView(heading);
+    TextView sub=text("Layer audio and design your own soundscapes.",13,false);sub.setTextColor(0xffc6a6cf);root.addView(sub);
+    TextView info=text("MASTER TRANSPORT",15,false);info.setPadding(0,22,0,18);root.addView(info);
+    Button add=button("＋ Add audio");
     add.setOnClickListener(v->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("audio/*");i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);startActivityForResult(i,PICK_AUDIO);});
     LinearLayout controls=new LinearLayout(this);controls.setOrientation(LinearLayout.HORIZONTAL);root.addView(controls);
-    Button play=button("▶ PLAY ALL");controls.addView(play,new LinearLayout.LayoutParams(0,-2,1));
-    Button pause=button("Ⅱ PAUSE");controls.addView(pause,new LinearLayout.LayoutParams(0,-2,1));
-    Button reset=button("↺ RESET");controls.addView(reset,new LinearLayout.LayoutParams(0,-2,1));
-    play.setOnClickListener(v->{if(tracks.isEmpty()){status.setText("Add an audio file first.");return;}int count=0;for(Track t:tracks){try{t.player.start();count++;}catch(Exception e){status.setText("Playback error: "+e.getMessage());}}if(count>0){playing=true;status.setText("Playing "+count+" track(s)");}});
+    Button play=button("▶ Play mix");controls.addView(play,new LinearLayout.LayoutParams(0,-2,1));
+    Button pause=button("Ⅱ Pause");controls.addView(pause,new LinearLayout.LayoutParams(0,-2,1));
+    Button reset=button("↺ Restart edited mix");controls.addView(reset,new LinearLayout.LayoutParams(0,-2,1));
+    play.setOnClickListener(v->{if(tracks.isEmpty()){status.setText("Add an audio file first.");return;}int count=0;for(Track t:tracks){try{if(!hasSolo()||t.solo){t.player.start();count++;}}catch(Exception e){status.setText("Playback error: "+e.getMessage());}}if(count>0){playing=true;status.setText("Playing "+count+" track(s)");}});
     pause.setOnClickListener(v->{for(Track t:tracks)if(t.player.isPlaying())t.player.pause();playing=false;status.setText("Paused");});
     reset.setOnClickListener(v->{for(Track t:tracks){t.player.pause();t.player.seekTo(0);}playing=false;status.setText("Reset to start");});
     status=text("Ready to import audio",14,false);status.setTextColor(0xffcbb5d5);status.setPadding(0,16,0,14);root.addView(status);
-    TextView title=text("YOUR TRACKS",18,true);title.setTextColor(accent);root.addView(title);
+    LinearLayout jump=new LinearLayout(this);root.addView(jump);
+    Button back=button("−15 sec");jump.addView(back,new LinearLayout.LayoutParams(0,-2,1));back.setOnClickListener(v->seekAll(-15000));
+    Button middle=button("Middle");jump.addView(middle,new LinearLayout.LayoutParams(0,-2,1));middle.setOnClickListener(v->{for(Track t:tracks)t.player.seekTo(t.player.getDuration()/2);});
+    Button forward=button("+15 sec");jump.addView(forward,new LinearLayout.LayoutParams(0,-2,1));forward.setOnClickListener(v->seekAll(15000));
+    TextView title=text("Audio layers",23,true);title.setPadding(0,24,0,8);root.addView(title);
+    root.addView(add);
+    Button video=button("▣ Extract audio from video");root.addView(video);video.setOnClickListener(v->status.setText("Video extraction is not available in this build yet."));
     trackList=new LinearLayout(this);trackList.setOrientation(1);root.addView(trackList);
-    TextView foot=text("This first build tests native playback. Dream Voice, binaural beats, export, and Govee controls are not included yet.",13,false);foot.setTextColor(0xffb7a5be);foot.setPadding(0,28,0,0);root.addView(foot);
+    TextView foot=text("Binaural beats, clip editing, project export, and Govee lighting are being rebuilt. These features are not active yet.",13,false);foot.setTextColor(0xffb7a5be);foot.setPadding(0,28,0,0);root.addView(foot);
   }
   private TextView text(String s,int size,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.WHITE);if(bold)t.setTypeface(null,Typeface.BOLD);return t;}
   private Button button(String s){Button b=new Button(this);b.setText(s);b.setTextColor(Color.WHITE);b.setAllCaps(false);b.setTextSize(13);b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff5b346c));return b;}
@@ -67,15 +74,26 @@ public class MainActivity extends Activity {
       String name=uri.getLastPathSegment();if(name==null)name="Audio track "+tracks.size();
       t.label=text(name,15,true);t.label.setSingleLine(true);t.label.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);card.addView(t.label);
       TextView duration=text("Duration: "+(player.getDuration()/60000)+":"+String.format(java.util.Locale.US,"%02d",(player.getDuration()/1000)%60),12,false);card.addView(duration);
-      TextView vlabel=text("Volume 100%",13,false);card.addView(vlabel);
+      TextView vlabel=text("Layer volume 100%",13,false);card.addView(vlabel);
       SeekBar vol=new SeekBar(this);vol.setMax(100);vol.setProgress(100);card.addView(vol);t.volume=vol;
-      vol.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){float level=p/100f;player.setVolume(level,level);vlabel.setText("Volume "+p+"%");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+      vol.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){float level=p/100f;updateVolumes();vlabel.setText("Layer volume "+p+"%");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
       LinearLayout row=new LinearLayout(this);row.setOrientation(0);card.addView(row);
       CheckBox loop=new CheckBox(this);loop.setText("Loop");loop.setTextColor(Color.WHITE);row.addView(loop);t.loop=loop;loop.setOnCheckedChangeListener((b,on)->player.setLooping(on));
       Button solo=button("▶ Track");row.addView(solo);solo.setOnClickListener(v->{if(player.isPlaying()){player.pause();solo.setText("▶ Track");}else{player.start();solo.setText("Ⅱ Track");}});
+      Button mute=button("Mute");row.addView(mute);mute.setOnClickListener(v->{t.muted=!t.muted;mute.setText(t.muted?"Unmute":"Mute");updateVolumes();});
+      Button isolate=button("Solo");row.addView(isolate);isolate.setOnClickListener(v->{t.solo=!t.solo;isolate.setText(t.solo?"Unsolo":"Solo");updateVolumes();});
+      TextView seekTitle=text("Preview position",13,false);card.addView(seekTitle);
+      SeekBar seek=new SeekBar(this);seek.setMax(Math.max(1,player.getDuration()));seek.setProgress(0);card.addView(seek);
+      seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){if(user)player.seekTo(p);}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+      TextView speedLabel=text("Speed 1.00×",13,false);card.addView(speedLabel);
+      SeekBar speed=new SeekBar(this);speed.setMax(150);speed.setProgress(50);card.addView(speed);
+      speed.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){float rate=0.5f+p/100f;speedLabel.setText(String.format(java.util.Locale.US,"Speed %.2f×",rate));try{player.setPlaybackParams(player.getPlaybackParams().setSpeed(rate));}catch(Exception ignored){}}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
       Button remove=button("✕");row.addView(remove);remove.setOnClickListener(v->{player.release();tracks.remove(t);trackList.removeView(card);status.setText("Track removed");});
       status.setText("Imported "+tracks.size()+" track(s)");
     }catch(Exception e){status.setText("Could not open audio: "+e.getMessage());}
   }
+  private boolean hasSolo(){for(Track t:tracks)if(t.solo)return true;return false;}
+  private void updateVolumes(){boolean any=hasSolo();for(Track t:tracks){float v=(t.muted||(any&&!t.solo))?0:t.volume.getProgress()/100f;try{t.player.setVolume(v,v);}catch(Exception ignored){}}}
+  private void seekAll(int delta){for(Track t:tracks){int target=Math.max(0,Math.min(t.player.getDuration(),t.player.getCurrentPosition()+delta));t.player.seekTo(target);}}
   @Override protected void onDestroy(){for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
 }
