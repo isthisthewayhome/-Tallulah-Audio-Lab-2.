@@ -27,9 +27,9 @@ public class MainActivity extends Activity {
   private final Handler rhythmHandler = new Handler(Looper.getMainLooper());
   private AudioTrack rhythmTone;
   private boolean rhythmEnabled=false;
-  private int rhythmBpm=40, rhythmVolume=30, rhythmPattern=0, rhythmTick=0;
+  private int rhythmBpm=40, rhythmVolume=30, rhythmPunch=100, rhythmPattern=0, rhythmTick=0;
   private TextView rhythmStatus;
-  private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,Math.min(240,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));if(rhythmPattern==2)bpm=Math.min(240,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText("Rhythm guide • "+bpm+" BPM • audible cue");rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
+  private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,Math.min(400,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));if(rhythmPattern==2)bpm=Math.min(400,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText("Rhythm guide • "+bpm+" BPM • audible cue");rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
   private final int bg = Color.rgb(16,13,24), panel = Color.rgb(34,25,45), accent = Color.rgb(187,115,213);
   private static class Track {
     MediaPlayer player; Uri uri; SeekBar volume; CheckBox loop; TextView label; boolean muted=false, solo=false;
@@ -71,12 +71,15 @@ public class MainActivity extends Activity {
     rhythmStatus=text("Rhythm guide stopped",14,false);rhythmStatus.setPadding(0,14,0,8);rhythmCard.addView(rhythmStatus);
     Button rhythmToggle=button("▶ Start rhythm guide");rhythmCard.addView(rhythmToggle);
     rhythmToggle.setOnClickListener(v->{rhythmEnabled=!rhythmEnabled;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmEnabled){rhythmTick=0;resetRhythmTone();rhythmHandler.post(rhythmTask);rhythmToggle.setText("■ Stop rhythm guide");}else{rhythmToggle.setText("▶ Start rhythm guide");rhythmStatus.setText("Rhythm guide stopped");}});
-    TextView tempo=text("Tempo • 40 BPM",14,false);rhythmCard.addView(tempo);
-    SeekBar tempoSlider=new SeekBar(this);tempoSlider.setMax(225);tempoSlider.setProgress(25);rhythmCard.addView(tempoSlider);
-    tempoSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){rhythmBpm=p+15;tempo.setText("Tempo • "+rhythmBpm+" BPM");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+    TextView tempo=text("Live BPM • 40",16,true);rhythmCard.addView(tempo);
+    SeekBar tempoSlider=new SeekBar(this);tempoSlider.setMax(385);tempoSlider.setProgress(25);rhythmCard.addView(tempoSlider);
+    tempoSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){rhythmBpm=p+15;tempo.setText("Live BPM • "+rhythmBpm);if(rhythmEnabled){rhythmHandler.removeCallbacks(rhythmTask);rhythmHandler.post(rhythmTask);}}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
     TextView loud=text("Guide volume • 30%",14,false);rhythmCard.addView(loud);
     SeekBar loudSlider=new SeekBar(this);loudSlider.setMax(100);loudSlider.setProgress(30);rhythmCard.addView(loudSlider);
     loudSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){rhythmVolume=p;loud.setText("Guide volume • "+p+"%");if(rhythmEnabled)resetRhythmTone();}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+    TextView punchLabel=text("Bass Punch • 100%",14,false);rhythmCard.addView(punchLabel);
+    SeekBar punchSlider=new SeekBar(this);punchSlider.setMax(200);punchSlider.setProgress(100);rhythmCard.addView(punchSlider);
+    punchSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){rhythmPunch=p;punchLabel.setText("Bass Punch • "+p+"%");if(rhythmEnabled)resetRhythmTone();}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
     Spinner patterns=new Spinner(this);String[] names={"Steady pulse","Wave • rise and fall","Build • gradual acceleration"};ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);patterns.setAdapter(adapter);rhythmCard.addView(patterns);
     patterns.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){rhythmPattern=position;rhythmTick=0;}public void onNothingSelected(android.widget.AdapterView<?> parent){}});
     TextView foot=text("Binaural beats, clip editing, project export, and Govee lighting are being rebuilt. These features are not active yet.",13,false);foot.setTextColor(0xffb7a5be);foot.setPadding(0,28,0,0);root.addView(foot);
@@ -133,13 +136,13 @@ public class MainActivity extends Activity {
       double env=Math.pow(1.0-Math.min(1.0,t/0.14),3);
       double attack=Math.min(1.0,t/0.012);
       double wave=Math.sin(2*Math.PI*(65*t+20*t*t));
-      short v=(short)(wave*env*attack*12500);
+      short v=(short)(wave*env*attack*20000);
       pcm[i*2]=(byte)(v&255);pcm[i*2+1]=(byte)((v>>8)&255);
     }
     try{
       rhythmTone=new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()).setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()).setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(pcm.length).build();
       rhythmTone.write(pcm,0,pcm.length);
-      rhythmTone.setVolume(rhythmVolume/100f);
+      rhythmTone.setVolume(Math.min(1f,(rhythmVolume/100f)*(rhythmPunch/100f)));
     }catch(Exception e){rhythmTone=null;if(rhythmStatus!=null)rhythmStatus.setText("Pulse audio unavailable");}
   }
   private void playSoftPulse(){
