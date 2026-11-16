@@ -36,7 +36,7 @@ public class MainActivity extends Activity {
   private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,Math.min(400,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));if(rhythmPattern==2)bpm=Math.min(400,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText("Rhythm guide • "+bpm+" BPM • audible cue");rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
   private final int bg = Color.rgb(16,13,24), panel = Color.rgb(34,25,45), accent = Color.rgb(187,115,213);
   private static class Track {
-    MediaPlayer player; Uri uri; SeekBar volume; CheckBox loop; TextView label; boolean muted=false, solo=false;
+    MediaPlayer player; Uri uri; SeekBar volume; CheckBox loop; TextView label; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0;
     Track(MediaPlayer p,Uri u){player=p;uri=u;}
   }
   @Override public void onCreate(Bundle b){
@@ -55,9 +55,9 @@ public class MainActivity extends Activity {
     Button play=button("▶ Play mix");controls.addView(play,new LinearLayout.LayoutParams(0,-2,1));
     Button pause=button("Ⅱ Pause");controls.addView(pause,new LinearLayout.LayoutParams(0,-2,1));
     Button reset=button("↺ Restart edited mix");controls.addView(reset,new LinearLayout.LayoutParams(0,-2,1));
-    play.setOnClickListener(v->{if(tracks.isEmpty()){status.setText("Add an audio file first.");return;}int count=0;for(Track t:tracks){try{if(!hasSolo()||t.solo){t.player.start();count++;}}catch(Exception e){status.setText("Playback error: "+e.getMessage());}}if(count>0){playing=true;status.setText("Playing "+count+" track(s)");}});
+    play.setOnClickListener(v->{if(tracks.isEmpty()){status.setText("Add an audio file first.");return;}int count=0;for(Track t:tracks){try{if(!hasSolo()||t.solo){if(t.player.getCurrentPosition()>=t.trimEndMs)t.player.seekTo(t.trimStartMs);t.player.start();count++;}}catch(Exception e){status.setText("Playback error: "+e.getMessage());}}if(count>0){playing=true;status.setText("Playing "+count+" track(s)");}});
     pause.setOnClickListener(v->{for(Track t:tracks)if(t.player.isPlaying())t.player.pause();playing=false;status.setText("Paused");});
-    reset.setOnClickListener(v->{for(Track t:tracks){t.player.pause();t.player.seekTo(0);}playing=false;status.setText("Reset to start");});
+    reset.setOnClickListener(v->{for(Track t:tracks){t.player.pause();t.player.seekTo(t.trimStartMs);}playing=false;status.setText("Reset to start");});
     status=text("Ready to import audio",14,false);status.setTextColor(0xffcbb5d5);status.setPadding(0,16,0,14);root.addView(status);
     LinearLayout jump=new LinearLayout(this);root.addView(jump);
     Button back=button("−15 sec");jump.addView(back,new LinearLayout.LayoutParams(0,-2,1));back.setOnClickListener(v->seekAll(-15000));
@@ -131,7 +131,7 @@ public class MainActivity extends Activity {
     }catch(Exception ignored){}
     try{
       MediaPlayer player=new MediaPlayer();player.setDataSource(this,uri);player.prepare();
-      Track t=new Track(player,uri);tracks.add(t);
+      Track t=new Track(player,uri);t.trimEndMs=player.getDuration();tracks.add(t);
       LinearLayout card=new LinearLayout(this);card.setOrientation(1);card.setPadding(16,16,16,16);
       GradientDrawable shape=new GradientDrawable();shape.setColor(panel);shape.setCornerRadius(22);card.setBackground(shape);
       LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);cp.setMargins(0,12,0,0);trackList.addView(card,cp);
@@ -149,12 +149,27 @@ public class MainActivity extends Activity {
       TextView seekTitle=text("Preview position",13,false);card.addView(seekTitle);
       SeekBar seek=new SeekBar(this);seek.setMax(Math.max(1,player.getDuration()));seek.setProgress(0);card.addView(seek);
       seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){if(user)player.seekTo(p);}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+      Button clipEdit=button("✂ Trim clip");card.addView(clipEdit);clipEdit.setOnClickListener(v->showTrimEditor(t));
       TextView speedLabel=text("Speed 1.00×",13,false);card.addView(speedLabel);
       SeekBar speed=new SeekBar(this);speed.setMax(150);speed.setProgress(50);card.addView(speed);
       speed.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){float rate=0.5f+p/100f;speedLabel.setText(String.format(java.util.Locale.US,"Speed %.2f×",rate));try{player.setPlaybackParams(player.getPlaybackParams().setSpeed(rate));}catch(Exception ignored){}}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
       Button remove=button("✕");row.addView(remove);remove.setOnClickListener(v->{player.release();tracks.remove(t);trackList.removeView(card);status.setText("Track removed");});
       status.setText("Imported "+tracks.size()+" track(s)");
     }catch(Exception e){status.setText("Could not open audio: "+e.getMessage());}
+  }
+  private void showTrimEditor(Track t){
+    LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);form.setPadding(30,12,30,12);
+    TextView instruction=text("Set the portion of this audio to play, in seconds.",14,false);form.addView(instruction);
+    EditText start=new EditText(this);start.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);start.setText(String.valueOf(t.trimStartMs/1000));start.setHint("Start seconds");form.addView(start);
+    EditText end=new EditText(this);end.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);end.setText(String.valueOf(t.trimEndMs/1000));end.setHint("End seconds");form.addView(end);
+    new android.app.AlertDialog.Builder(this).setTitle("Trim audio").setView(form).setNegativeButton("Cancel",null).setPositiveButton("Apply",(dialog,which)->{
+      try{
+        long a=Long.parseLong(start.getText().toString())*1000L;
+        long z=Long.parseLong(end.getText().toString())*1000L;
+        if(a<0||z<=a||z>t.player.getDuration()){status.setText("Invalid trim range");return;}
+        t.trimStartMs=(int)a;t.trimEndMs=(int)z;t.player.seekTo(t.trimStartMs);status.setText("Trim saved for playback");
+      }catch(Exception ex){status.setText("Enter valid whole seconds");}
+    }).show();
   }
   private boolean hasSolo(){for(Track t:tracks)if(t.solo)return true;return false;}
   private void updateVolumes(){boolean any=hasSolo();for(Track t:tracks){float v=(t.muted||(any&&!t.solo))?0:t.volume.getProgress()/100f;try{t.player.setVolume(v,v);}catch(Exception ignored){}}}
