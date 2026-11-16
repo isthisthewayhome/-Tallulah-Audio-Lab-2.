@@ -31,7 +31,7 @@ public class MainActivity extends Activity {
   private TextView status;
   private boolean playing = false;
   private final Handler clipHandler=new Handler(Looper.getMainLooper());
-  private final Runnable clipMonitor=new Runnable(){public void run(){for(Track t:tracks){try{if(t.player.isPlaying()&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}clipHandler.postDelayed(this,80);}};
+  private final Runnable clipMonitor=new Runnable(){public void run(){for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}clipHandler.postDelayed(this,80);}};
   private final Handler rhythmHandler = new Handler(Looper.getMainLooper());
   private AudioTrack rhythmTone;
   private boolean rhythmEnabled=false;
@@ -151,7 +151,7 @@ public class MainActivity extends Activity {
       SeekBar vol=new SeekBar(this);vol.setMax(100);vol.setProgress(100);card.addView(vol);t.volume=vol;
       vol.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){float level=p/100f;updateVolumes();vlabel.setText("Layer volume "+p+"%");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
       LinearLayout row=new LinearLayout(this);row.setOrientation(0);card.addView(row);
-      CheckBox loop=new CheckBox(this);loop.setText("Loop");loop.setTextColor(Color.WHITE);row.addView(loop);t.loop=loop;loop.setOnCheckedChangeListener((b,on)->player.setLooping(on && t.trimStartMs==0 && t.trimEndMs>=player.getDuration()));
+      CheckBox loop=new CheckBox(this);loop.setText("Loop");loop.setTextColor(Color.WHITE);row.addView(loop);t.loop=loop;loop.setOnCheckedChangeListener((b,on)->{boolean whole=t.trimStartMs==0 && t.trimEndMs>=player.getDuration()-150;player.setLooping(on&&whole);});
       player.setOnCompletionListener(mp->{if(t.loop!=null&&t.loop.isChecked()){try{mp.seekTo(t.trimStartMs);mp.start();}catch(Exception e){status.setText("Loop error: "+e.getMessage());}}});
       Button solo=button("▶ Track");row.addView(solo);solo.setOnClickListener(v->{if(player.isPlaying()){player.pause();solo.setText("▶ Track");}else{player.start();solo.setText("Ⅱ Track");}});
       Button mute=button("Mute");row.addView(mute);mute.setOnClickListener(v->{t.muted=!t.muted;mute.setText(t.muted?"Unmute":"Mute");updateVolumes();});
@@ -243,7 +243,7 @@ public class MainActivity extends Activity {
             int previousVolume=source.volume!=null?source.volume.getProgress():100;
             load(Uri.fromFile(finished));
             Track added=tracks.remove(tracks.size()-1);tracks.add(Math.min(position,tracks.size()),added);
-            added.volume.setProgress(previousVolume);added.loop.setChecked(wasLooping);
+            added.volume.setProgress(previousVolume);added.trimStartMs=0;added.trimEndMs=added.player.getDuration();added.loop.setChecked(wasLooping);added.player.setLooping(wasLooping);
             source.player.pause();source.player.release();tracks.remove(source);trackList.removeView(source.card);
             updateVolumes();
             status.setText("New trimmed clip: "+clock(added.player.getDuration())+" • original phone file untouched");
