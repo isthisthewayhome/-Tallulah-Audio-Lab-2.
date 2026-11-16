@@ -157,18 +157,41 @@ public class MainActivity extends Activity {
       status.setText("Imported "+tracks.size()+" track(s)");
     }catch(Exception e){status.setText("Could not open audio: "+e.getMessage());}
   }
+  private String clock(int ms){
+    int seconds=Math.max(0,ms)/1000;
+    return String.format(java.util.Locale.US,"%d:%02d",seconds/60,seconds%60);
+  }
   private void showTrimEditor(Track t){
-    LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);form.setPadding(30,12,30,12);
-    TextView instruction=text("Set the portion of this audio to play, in seconds.",14,false);form.addView(instruction);
-    EditText start=new EditText(this);start.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);start.setText(String.valueOf(t.trimStartMs/1000));start.setHint("Start seconds");form.addView(start);
-    EditText end=new EditText(this);end.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);end.setText(String.valueOf(t.trimEndMs/1000));end.setHint("End seconds");form.addView(end);
-    new android.app.AlertDialog.Builder(this).setTitle("Trim audio").setView(form).setNegativeButton("Cancel",null).setPositiveButton("Apply",(dialog,which)->{
-      try{
-        long a=Long.parseLong(start.getText().toString())*1000L;
-        long z=Long.parseLong(end.getText().toString())*1000L;
-        if(a<0||z<=a||z>t.player.getDuration()){status.setText("Invalid trim range");return;}
-        t.trimStartMs=(int)a;t.trimEndMs=(int)z;t.player.seekTo(t.trimStartMs);status.setText("Trim saved for playback");
-      }catch(Exception ex){status.setText("Enter valid whole seconds");}
+    int duration=Math.max(1,t.player.getDuration());
+    LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);form.setPadding(32,16,32,12);
+    TextView original=text("Original duration: "+clock(duration),14,false);form.addView(original);
+    TextView startLabel=text("",15,true);form.addView(startLabel);
+    SeekBar startBar=new SeekBar(this);startBar.setMax(duration);startBar.setProgress(t.trimStartMs);form.addView(startBar);
+    TextView endLabel=text("",15,true);form.addView(endLabel);
+    SeekBar endBar=new SeekBar(this);endBar.setMax(duration);endBar.setProgress(t.trimEndMs>0?t.trimEndMs:duration);form.addView(endBar);
+    TextView selected=text("",17,true);selected.setTextColor(accent);selected.setPadding(0,20,0,8);form.addView(selected);
+    TextView hint=text("Move the START and END sliders to select the part you want to keep. Changes are previewed here before applying.",13,false);form.addView(hint);
+    final Runnable update=()->{
+      int start=startBar.getProgress(),end=endBar.getProgress();
+      startLabel.setText("Start: "+clock(start));
+      endLabel.setText("End: "+clock(end));
+      selected.setText("Selected clip: "+clock(start)+" – "+clock(end)+"   •   Length: "+clock(end-start));
+    };
+    SeekBar.OnSeekBarChangeListener listener=new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar bar,int progress,boolean fromUser){
+        if(bar==startBar&&progress>=endBar.getProgress())startBar.setProgress(Math.max(0,endBar.getProgress()-1000));
+        if(bar==endBar&&progress<=startBar.getProgress())endBar.setProgress(Math.min(duration,startBar.getProgress()+1000));
+        update.run();
+      }
+      public void onStartTrackingTouch(SeekBar bar){}
+      public void onStopTrackingTouch(SeekBar bar){if(bar==startBar)t.player.seekTo(startBar.getProgress());}
+    };
+    startBar.setOnSeekBarChangeListener(listener);endBar.setOnSeekBarChangeListener(listener);update.run();
+    new android.app.AlertDialog.Builder(this).setTitle("Trim audio visually").setView(form).setNegativeButton("Cancel",null).setPositiveButton("Apply trim",(dialog,which)->{
+      int start=startBar.getProgress(),end=endBar.getProgress();
+      if(end<=start){status.setText("Choose an end after the start");return;}
+      t.trimStartMs=start;t.trimEndMs=end;t.player.seekTo(start);
+      status.setText("Trim: "+clock(start)+" – "+clock(end)+" ("+clock(end-start)+")");
     }).show();
   }
   private boolean hasSolo(){for(Track t:tracks)if(t.solo)return true;return false;}
