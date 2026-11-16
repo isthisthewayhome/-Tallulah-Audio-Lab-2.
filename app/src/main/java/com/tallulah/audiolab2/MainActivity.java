@@ -151,7 +151,8 @@ public class MainActivity extends Activity {
       SeekBar vol=new SeekBar(this);vol.setMax(100);vol.setProgress(100);card.addView(vol);t.volume=vol;
       vol.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){float level=p/100f;updateVolumes();vlabel.setText("Layer volume "+p+"%");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
       LinearLayout row=new LinearLayout(this);row.setOrientation(0);card.addView(row);
-      CheckBox loop=new CheckBox(this);loop.setText("Loop");loop.setTextColor(Color.WHITE);row.addView(loop);t.loop=loop;loop.setOnCheckedChangeListener((b,on)->player.setLooping(false));
+      CheckBox loop=new CheckBox(this);loop.setText("Loop");loop.setTextColor(Color.WHITE);row.addView(loop);t.loop=loop;loop.setOnCheckedChangeListener((b,on)->player.setLooping(on && t.trimStartMs==0 && t.trimEndMs>=player.getDuration()));
+      player.setOnCompletionListener(mp->{if(t.loop!=null&&t.loop.isChecked()){try{mp.seekTo(t.trimStartMs);mp.start();}catch(Exception e){status.setText("Loop error: "+e.getMessage());}}});
       Button solo=button("▶ Track");row.addView(solo);solo.setOnClickListener(v->{if(player.isPlaying()){player.pause();solo.setText("▶ Track");}else{player.start();solo.setText("Ⅱ Track");}});
       Button mute=button("Mute");row.addView(mute);mute.setOnClickListener(v->{t.muted=!t.muted;mute.setText(t.muted?"Unmute":"Mute");updateVolumes();});
       Button isolate=button("Solo");row.addView(isolate);isolate.setOnClickListener(v->{t.solo=!t.solo;isolate.setText(t.solo?"Unsolo":"Solo");updateVolumes();});
@@ -238,10 +239,13 @@ public class MainActivity extends Activity {
           try{
             int position=tracks.indexOf(source);
             if(position<0)return;
-            source.player.pause();
-            source.player.release();tracks.remove(source);trackList.removeView(source.card);
+            boolean wasLooping=source.loop!=null&&source.loop.isChecked();
+            int previousVolume=source.volume!=null?source.volume.getProgress():100;
             load(Uri.fromFile(finished));
             Track added=tracks.remove(tracks.size()-1);tracks.add(Math.min(position,tracks.size()),added);
+            added.volume.setProgress(previousVolume);added.loop.setChecked(wasLooping);
+            source.player.pause();source.player.release();tracks.remove(source);trackList.removeView(source.card);
+            updateVolumes();
             status.setText("New trimmed clip: "+clock(added.player.getDuration())+" • original phone file untouched");
           }catch(Exception e){status.setText("Trim created but could not load: "+e.getMessage());}
         });
