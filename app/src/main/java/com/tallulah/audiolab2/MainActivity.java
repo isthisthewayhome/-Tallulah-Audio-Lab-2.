@@ -17,6 +17,12 @@ import android.graphics.drawable.GradientDrawable;
 import android.view.View;
 import android.widget.*;
 import java.util.ArrayList;
+import android.media.MediaExtractor;
+import android.media.MediaCodec;
+import android.media.MediaFormat;
+import java.nio.ByteBuffer;
+import java.io.File;
+import java.io.RandomAccessFile;
 
 public class MainActivity extends Activity {
   private static final int PICK_AUDIO = 51;
@@ -24,6 +30,8 @@ public class MainActivity extends Activity {
   private LinearLayout trackList;
   private TextView status;
   private boolean playing = false;
+  private final Handler clipHandler=new Handler(Looper.getMainLooper());
+  private final Runnable clipMonitor=new Runnable(){public void run(){for(Track t:tracks){try{if(t.player.isPlaying()&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}clipHandler.postDelayed(this,80);}};
   private final Handler rhythmHandler = new Handler(Looper.getMainLooper());
   private AudioTrack rhythmTone;
   private boolean rhythmEnabled=false;
@@ -36,11 +44,12 @@ public class MainActivity extends Activity {
   private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,Math.min(400,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));if(rhythmPattern==2)bpm=Math.min(400,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText("Rhythm guide • "+bpm+" BPM • audible cue");rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
   private final int bg = Color.rgb(16,13,24), panel = Color.rgb(34,25,45), accent = Color.rgb(187,115,213);
   private static class Track {
-    MediaPlayer player; Uri uri; SeekBar volume; CheckBox loop; TextView label; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0;
+    MediaPlayer player; Uri uri; SeekBar volume; CheckBox loop; TextView label; LinearLayout card; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0;
     Track(MediaPlayer p,Uri u){player=p;uri=u;}
   }
   @Override public void onCreate(Bundle b){
     super.onCreate(b);
+    clipHandler.post(clipMonitor);
     getWindow().setStatusBarColor(bg);
     getWindow().setNavigationBarColor(bg);
     ScrollView scroll = new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(bg);
@@ -134,7 +143,7 @@ public class MainActivity extends Activity {
       Track t=new Track(player,uri);t.trimEndMs=player.getDuration();tracks.add(t);
       LinearLayout card=new LinearLayout(this);card.setOrientation(1);card.setPadding(16,16,16,16);
       GradientDrawable shape=new GradientDrawable();shape.setColor(panel);shape.setCornerRadius(22);card.setBackground(shape);
-      LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);cp.setMargins(0,12,0,0);trackList.addView(card,cp);
+      LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);cp.setMargins(0,12,0,0);trackList.addView(card,cp);t.card=card;
       String name=uri.getLastPathSegment();if(name==null)name="Audio track "+tracks.size();
       t.label=text(name,15,true);t.label.setSingleLine(true);t.label.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);card.addView(t.label);
       TextView duration=text("Duration: "+(player.getDuration()/60000)+":"+String.format(java.util.Locale.US,"%02d",(player.getDuration()/1000)%60),12,false);card.addView(duration);
@@ -142,7 +151,7 @@ public class MainActivity extends Activity {
       SeekBar vol=new SeekBar(this);vol.setMax(100);vol.setProgress(100);card.addView(vol);t.volume=vol;
       vol.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){float level=p/100f;updateVolumes();vlabel.setText("Layer volume "+p+"%");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
       LinearLayout row=new LinearLayout(this);row.setOrientation(0);card.addView(row);
-      CheckBox loop=new CheckBox(this);loop.setText("Loop");loop.setTextColor(Color.WHITE);row.addView(loop);t.loop=loop;loop.setOnCheckedChangeListener((b,on)->player.setLooping(on));
+      CheckBox loop=new CheckBox(this);loop.setText("Loop");loop.setTextColor(Color.WHITE);row.addView(loop);t.loop=loop;loop.setOnCheckedChangeListener((b,on)->player.setLooping(false));
       Button solo=button("▶ Track");row.addView(solo);solo.setOnClickListener(v->{if(player.isPlaying()){player.pause();solo.setText("▶ Track");}else{player.start();solo.setText("Ⅱ Track");}});
       Button mute=button("Mute");row.addView(mute);mute.setOnClickListener(v->{t.muted=!t.muted;mute.setText(t.muted?"Unmute":"Mute");updateVolumes();});
       Button isolate=button("Solo");row.addView(isolate);isolate.setOnClickListener(v->{t.solo=!t.solo;isolate.setText(t.solo?"Unsolo":"Solo");updateVolumes();});
@@ -190,10 +199,58 @@ public class MainActivity extends Activity {
     new android.app.AlertDialog.Builder(this).setTitle("Trim audio visually").setView(form).setNegativeButton("Cancel",null).setPositiveButton("Apply trim",(dialog,which)->{
       int start=startBar.getProgress(),end=endBar.getProgress();
       if(end<=start){status.setText("Choose an end after the start");return;}
-      t.trimStartMs=start;t.trimEndMs=end;t.player.seekTo(start);
-      status.setText("Trim: "+clock(start)+" – "+clock(end)+" ("+clock(end-start)+")");
+      createTrimmedFile(t,start,end);
     }).show();
   }
+  private void createTrimmedFile(Track source,int startMs,int endMs){
+    status.setText("Creating trimmed WAV clip…");
+    new Thread(()->{
+      File output=null;MediaExtractor extractor=null;MediaCodec decoder=null;
+      try{
+        extractor=new MediaExtractor();extractor.setDataSource(this,source.uri,null);
+        int track=-1;MediaFormat format=null;
+        for(int i=0;i<extractor.getTrackCount();i++){MediaFormat f=extractor.getTrackFormat(i);if(f.getString(MediaFormat.KEY_MIME).startsWith("audio/")){track=i;format=f;break;}}
+        if(track<0)throw new Exception("No audio stream");
+        extractor.selectTrack(track);
+        decoder=MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME));decoder.configure(format,null,null,0);decoder.start();
+        extractor.seekTo(startMs*1000L,MediaExtractor.SEEK_TO_PREVIOUS_SYNC);
+        output=new File(getCacheDir(),"trim_"+System.currentTimeMillis()+".wav");
+        RandomAccessFile wav=new RandomAccessFile(output,"rw");wav.setLength(0);wav.write(new byte[44]);
+        int rate=format.getInteger(MediaFormat.KEY_SAMPLE_RATE),channels=format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+        long bytes=0;boolean inputDone=false,outputDone=false;MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
+        while(!outputDone){
+          if(!inputDone){int index=decoder.dequeueInputBuffer(10000);if(index>=0){ByteBuffer in=decoder.getInputBuffer(index);in.clear();int size=extractor.readSampleData(in,0);long time=extractor.getSampleTime();if(size<0||time>=endMs*1000L){decoder.queueInputBuffer(index,0,0,0,MediaCodec.BUFFER_FLAG_END_OF_STREAM);inputDone=true;}else{decoder.queueInputBuffer(index,0,size,Math.max(0,time),0);extractor.advance();}}}
+          int index=decoder.dequeueOutputBuffer(info,10000);
+          if(index==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){MediaFormat decoded=decoder.getOutputFormat();rate=decoded.getInteger(MediaFormat.KEY_SAMPLE_RATE);channels=decoded.getInteger(MediaFormat.KEY_CHANNEL_COUNT);if(decoded.containsKey(MediaFormat.KEY_PCM_ENCODING)&&decoded.getInteger(MediaFormat.KEY_PCM_ENCODING)!=2)throw new Exception("Unsupported PCM encoding");}
+          else if(index>=0){
+            if(info.size>0&&info.presentationTimeUs>=startMs*1000L&&info.presentationTimeUs<endMs*1000L){
+              ByteBuffer pcm=decoder.getOutputBuffer(index);pcm.position(info.offset);pcm.limit(info.offset+info.size);
+              byte[] chunk=new byte[info.size];pcm.get(chunk);wav.write(chunk);bytes+=chunk.length;
+            }
+            if((info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0)outputDone=true;
+            decoder.releaseOutputBuffer(index,false);
+          }
+        }
+        if(bytes==0||bytes>0xffffffffL-36)throw new Exception("No supported audio samples");
+        wav.seek(0);wav.writeBytes("RIFF");writeLe(wav,(int)(36+bytes));wav.writeBytes("WAVEfmt ");writeLe(wav,16);writeShortLe(wav,1);writeShortLe(wav,channels);writeLe(wav,rate);writeLe(wav,rate*channels*2);writeShortLe(wav,channels*2);writeShortLe(wav,16);wav.writeBytes("data");writeLe(wav,(int)bytes);wav.close();
+        File finished=output;
+        runOnUiThread(()->{
+          try{
+            int position=tracks.indexOf(source);
+            if(position<0)return;
+            source.player.pause();
+            source.player.release();tracks.remove(source);trackList.removeView(source.card);
+            load(Uri.fromFile(finished));
+            Track added=tracks.remove(tracks.size()-1);tracks.add(Math.min(position,tracks.size()),added);
+            status.setText("New trimmed clip: "+clock(added.player.getDuration())+" • original phone file untouched");
+          }catch(Exception e){status.setText("Trim created but could not load: "+e.getMessage());}
+        });
+      }catch(Exception e){if(output!=null)output.delete();String message=e.getMessage();runOnUiThread(()->status.setText("Trim failed; original kept: "+message));}
+      finally{if(decoder!=null){try{decoder.stop();}catch(Exception ignored){}decoder.release();}if(extractor!=null)extractor.release();}
+    },"TrimAudio").start();
+  }
+  private void writeLe(RandomAccessFile f,int value)throws Exception{for(int i=0;i<4;i++)f.write((value>>(i*8))&255);}
+  private void writeShortLe(RandomAccessFile f,int value)throws Exception{f.write(value&255);f.write((value>>8)&255);}
   private boolean hasSolo(){for(Track t:tracks)if(t.solo)return true;return false;}
   private void updateVolumes(){boolean any=hasSolo();for(Track t:tracks){float v=(t.muted||(any&&!t.solo))?0:t.volume.getProgress()/100f;try{t.player.setVolume(v,v);}catch(Exception ignored){}}}
   private void seekAll(int delta){for(Track t:tracks){int target=Math.max(0,Math.min(t.player.getDuration(),t.player.getCurrentPosition()+delta));t.player.seekTo(target);}}
@@ -255,5 +312,5 @@ public class MainActivity extends Activity {
     if(rhythmTone==null)return;
     try{rhythmTone.pause();rhythmTone.setPlaybackHeadPosition(0);rhythmTone.play();}catch(Exception ignored){}
   }
-  @Override protected void onDestroy(){atmosphereOn=false;stereoOn=false;rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
+  @Override protected void onDestroy(){clipHandler.removeCallbacks(clipMonitor);atmosphereOn=false;stereoOn=false;rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
 }
