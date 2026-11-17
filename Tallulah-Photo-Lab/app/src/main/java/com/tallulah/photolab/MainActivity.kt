@@ -16,7 +16,8 @@ class MainActivity : Activity() {
     private lateinit var message: TextView
     private var source: Bitmap? = null
     private var result: Bitmap? = null
-    private val sliders = linkedMapOf("Brightness" to 0, "Contrast" to 0, "Saturation" to 0, "Shadows" to 0, "Warmth" to 0, "Sharpen" to 0)
+    private var comparing = false
+    private val sliders = linkedMapOf("Brightness" to 0, "Contrast" to 0, "Saturation" to 0, "Shadows" to 0, "Warmth" to 0, "Sharpen" to 0, "Denoise" to 0)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val root = LinearLayout(this).apply { orientation=1; setPadding(12,12,12,12); setBackgroundColor(Color.rgb(22,22,30)) }
@@ -27,7 +28,7 @@ class MainActivity : Activity() {
             bar.addView(Button(this).apply { text=name; setOnClickListener { f() } }, LinearLayout.LayoutParams(0,-2,1f))
         }
         addButton("Open") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type="image/*"; addCategory(Intent.CATEGORY_OPENABLE) },1) }
-        addButton("Compare") { image.setImageBitmap(if(image.drawable != null && result != null) source else result) }
+        addButton("Compare") { comparing = !comparing; image.setImageBitmap(if(comparing) source else result); message.text = if(comparing) "Showing original" else "Showing edited" }
         addButton("Save") { saveImage() }
         root.addView(bar)
         image = ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; setBackgroundColor(Color.DKGRAY) }
@@ -60,8 +61,9 @@ class MainActivity : Activity() {
             val uri=data?.data ?: return
             try {
                 val decoded=contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it) } ?: return
-                val ratio=min(1.0,2048.0/max(decoded.width,decoded.height))
+                val ratio=min(1.0,3072.0/max(decoded.width,decoded.height))
                 source=Bitmap.createScaledBitmap(decoded,max(1,(decoded.width*ratio).toInt()),max(1,(decoded.height*ratio).toInt()),true).copy(Bitmap.Config.ARGB_8888,false)
+                comparing = false
                 render()
             } catch(e:Exception) { message.text="Open failed: ${e.message}" }
         }
@@ -88,6 +90,23 @@ class MainActivity : Activity() {
             fun clamp(v:Double)=v.roundToInt().coerceIn(0,255)
             pixels[i]=Color.argb(Color.alpha(p),clamp(gray+(r-gray)*sat),clamp(gray+(g-gray)*sat),clamp(gray+(bl-gray)*sat))
         }
+        val denoise = sliders["Denoise"]!!.coerceAtLeast(0) / 100.0
+        if (denoise > 0 && w > 2 && h > 2) {
+            val copy = pixels.clone()
+            for (y in 1 until h-1) for (x in 1 until w-1) {
+                val i = y*w+x
+                val center = copy[i]
+                val neighbors = intArrayOf(copy[i-w], copy[i+w], copy[i-1], copy[i+1])
+                fun smooth(shift:Int):Int {
+                    val v=(center shr shift) and 255
+                    val avg=neighbors.sumOf { (it shr shift) and 255 } / 4.0
+                    val diff=abs(v-avg)
+                    val weight=denoise * (1.0-diff/100.0).coerceIn(0.0,1.0)
+                    return (v*(1-weight)+avg*weight).roundToInt().coerceIn(0,255)
+                }
+                pixels[i]=Color.argb(Color.alpha(center),smooth(16),smooth(8),smooth(0))
+            }
+        }
         val sharp=sliders["Sharpen"]!!/100.0
         if(sharp>0 && w>2 && h>2) {
             val copy=pixels.clone()
@@ -103,8 +122,9 @@ class MainActivity : Activity() {
             }
         }
         result=Bitmap.createBitmap(pixels,w,h,Bitmap.Config.ARGB_8888)
+        comparing = false
         image.setImageBitmap(result)
-        message.text="Edited preview: $w × $h. Export is limited to 2048 px."
+        message.text="Edited: $w × $h. Maximum working dimension: 3072 px. Denoise is not AI restoration."
     }
     private fun saveImage() {
         val bmp=result ?: run { message.text="Open a photo first"; return }
