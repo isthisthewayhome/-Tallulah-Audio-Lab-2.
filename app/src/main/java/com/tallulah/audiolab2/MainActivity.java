@@ -68,10 +68,6 @@ public class MainActivity extends Activity {
     pause.setOnClickListener(v->{for(Track t:tracks)if(t.player.isPlaying())t.player.pause();playing=false;status.setText("Paused");});
     reset.setOnClickListener(v->{for(Track t:tracks){t.player.pause();t.player.seekTo(t.trimStartMs);}playing=false;status.setText("Reset to start");});
     status=text("Ready to import audio",14,false);status.setTextColor(0xffcbb5d5);status.setPadding(0,16,0,14);root.addView(status);
-    LinearLayout jump=new LinearLayout(this);root.addView(jump);
-    Button back=button("−15 sec");jump.addView(back,new LinearLayout.LayoutParams(0,-2,1));back.setOnClickListener(v->seekAll(-15000));
-    Button middle=button("Middle");jump.addView(middle,new LinearLayout.LayoutParams(0,-2,1));middle.setOnClickListener(v->{for(Track t:tracks)t.player.seekTo(t.player.getDuration()/2);});
-    Button forward=button("+15 sec");jump.addView(forward,new LinearLayout.LayoutParams(0,-2,1));forward.setOnClickListener(v->seekAll(15000));
     TextView title=text("Audio layers",23,true);title.setPadding(0,24,0,8);root.addView(title);
     root.addView(add);
     Button video=button("▣ Extract audio from video");root.addView(video);video.setOnClickListener(v->status.setText("Video extraction is not available in this build yet."));
