@@ -290,24 +290,86 @@ public class MainActivity extends Activity {
     };
     refreshPresets.run();
     Button savePreset=button("Save rhythm preset");rhythmCard.addView(savePreset);
-    Button loadPreset=button("Load selected preset");rhythmCard.addView(loadPreset);
+    Button loadPreset=button("Quick load selected preset");rhythmCard.addView(loadPreset);
+    Button updatePreset=button("Update selected preset");rhythmCard.addView(updatePreset);
+    Button renamePreset=button("Rename selected preset");rhythmCard.addView(renamePreset);
+    Button deletePreset=button("Delete selected preset");rhythmCard.addView(deletePreset);
     TextView presetMessage=text("Presets stay on this phone until app data is cleared.",13,false);rhythmCard.addView(presetMessage);
+    final java.util.function.Supplier<org.json.JSONObject> currentSettings=()->{
+      org.json.JSONObject preset=new org.json.JSONObject();
+      try{
+        preset.put("bps",preciseStrokeBps>0?preciseStrokeBps:rhythmBpm/60.0);
+        preset.put("sound",rhythmSound);preset.put("volume",rhythmVolume);
+        preset.put("punch",rhythmPunch);preset.put("pattern",rhythmPattern);
+        preset.put("offset",strokeOffsetPercent);preset.put("sync",strokeSync);
+      }catch(Exception ignored){}
+      return preset;
+    };
     savePreset.setOnClickListener(v->{
       String name=presetName.getText().toString().trim();
       if(name.length()==0){presetMessage.setText("Enter a name first.");return;}
       if(name.length()>40){presetMessage.setText("Use a name under 40 characters.");return;}
       try{
         org.json.JSONObject saved=new org.json.JSONObject(rhythmPrefs.getString("presets","{}"));
-        org.json.JSONObject preset=new org.json.JSONObject();
-        preset.put("bps",preciseStrokeBps>0?preciseStrokeBps:rhythmBpm/60.0);
-        preset.put("sound",rhythmSound);preset.put("volume",rhythmVolume);
-        preset.put("punch",rhythmPunch);preset.put("pattern",rhythmPattern);
-        preset.put("offset",strokeOffsetPercent);preset.put("sync",strokeSync);
-        saved.put(name,preset);
+        if(saved.has(name)){presetMessage.setText("That name already exists. Use Update selected preset to overwrite.");return;}
+        saved.put(name,currentSettings.get());
         rhythmPrefs.edit().putString("presets",saved.toString()).apply();
         refreshPresets.run();presetPicker.setSelection(presetNames.indexOf(name));
         presetMessage.setText("Saved: "+name);
       }catch(Exception e){presetMessage.setText("Could not save preset.");}
+    });
+    updatePreset.setOnClickListener(v->{
+      String name=presetPicker.getSelectedItem()==null?"":presetPicker.getSelectedItem().toString();
+      if(name.equals("Select saved preset")){presetMessage.setText("Select a preset to update.");return;}
+      new android.app.AlertDialog.Builder(this).setTitle("Update "+name+"?")
+        .setMessage("Replace its saved settings with the current rhythm settings?")
+        .setNegativeButton("Cancel",null).setPositiveButton("Update",(dialog,which)->{
+          try{
+            org.json.JSONObject saved=new org.json.JSONObject(rhythmPrefs.getString("presets","{}"));
+            if(!saved.has(name)){presetMessage.setText("Preset no longer exists.");return;}
+            saved.put(name,currentSettings.get());
+            rhythmPrefs.edit().putString("presets",saved.toString()).apply();
+            presetMessage.setText("Updated: "+name);
+          }catch(Exception e){presetMessage.setText("Could not update preset.");}
+        }).show();
+    });
+    renamePreset.setOnClickListener(v->{
+      String oldName=presetPicker.getSelectedItem()==null?"":presetPicker.getSelectedItem().toString();
+      String newName=presetName.getText().toString().trim();
+      if(oldName.equals("Select saved preset")){presetMessage.setText("Select a preset to rename.");return;}
+      if(newName.isEmpty()||newName.length()>40){presetMessage.setText("Enter a new name (1–40 characters).");return;}
+      if(oldName.equals(newName)){presetMessage.setText("That is already its name.");return;}
+      try{
+        org.json.JSONObject saved=new org.json.JSONObject(rhythmPrefs.getString("presets","{}"));
+        if(!saved.has(oldName)){presetMessage.setText("Preset no longer exists.");return;}
+        if(saved.has(newName)){presetMessage.setText("That name is already used.");return;}
+        new android.app.AlertDialog.Builder(this).setTitle("Rename preset?")
+          .setMessage(oldName+" → "+newName)
+          .setNegativeButton("Cancel",null).setPositiveButton("Rename",(dialog,which)->{
+            try{
+              org.json.JSONObject current=new org.json.JSONObject(rhythmPrefs.getString("presets","{}"));
+              if(!current.has(oldName)||current.has(newName))return;
+              Object settings=current.get(oldName);current.remove(oldName);current.put(newName,settings);
+              rhythmPrefs.edit().putString("presets",current.toString()).apply();
+              refreshPresets.run();presetPicker.setSelection(presetNames.indexOf(newName));
+              presetMessage.setText("Renamed: "+newName);
+            }catch(Exception e){presetMessage.setText("Could not rename preset.");}
+          }).show();
+      }catch(Exception e){presetMessage.setText("Could not rename preset.");}
+    });
+    deletePreset.setOnClickListener(v->{
+      String name=presetPicker.getSelectedItem()==null?"":presetPicker.getSelectedItem().toString();
+      if(name.equals("Select saved preset")){presetMessage.setText("Select a preset to delete.");return;}
+      new android.app.AlertDialog.Builder(this).setTitle("Delete "+name+"?")
+        .setMessage("This removes only the saved rhythm preset, not your audio files.")
+        .setNegativeButton("Cancel",null).setPositiveButton("Delete",(dialog,which)->{
+          try{
+            org.json.JSONObject saved=new org.json.JSONObject(rhythmPrefs.getString("presets","{}"));
+            saved.remove(name);rhythmPrefs.edit().putString("presets",saved.toString()).apply();
+            refreshPresets.run();presetPicker.setSelection(0);
+            presetMessage.setText("Deleted: "+name);
+          }catch(Exception e){presetMessage.setText("Could not delete preset.");}
+        }).show();
     });
     loadPreset.setOnClickListener(v->{
       String name=presetPicker.getSelectedItem()==null?"":presetPicker.getSelectedItem().toString();
