@@ -72,36 +72,36 @@ public class MainActivity extends Activity {
     TextView eyebrow=text("Y O U R   P R I V A T E   S O U N D   S T U D I O",13,true);eyebrow.setTextColor(accent);root.addView(eyebrow);
     TextView heading=text("Tallulah Audio Lab",30,true);heading.setTextColor(Color.WHITE);root.addView(heading);
     TextView sub=text("Layer audio and design your own soundscapes.",13,false);sub.setTextColor(0xffc6a6cf);root.addView(sub);
-    TextView info=text("MASTER TRANSPORT",15,false);info.setPadding(0,22,0,18);root.addView(info);
+    LinearLayout masterSection=collapsibleSection(root,"Master transport",true);
     Button add=button("＋ Add audio");
     add.setOnClickListener(v->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("audio/*");i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);startActivityForResult(i,PICK_AUDIO);});
-    LinearLayout controls=new LinearLayout(this);controls.setOrientation(LinearLayout.HORIZONTAL);root.addView(controls);
+    LinearLayout controls=new LinearLayout(this);controls.setOrientation(LinearLayout.HORIZONTAL);masterSection.addView(controls);
     Button play=button("▶ Play mix");controls.addView(play,new LinearLayout.LayoutParams(0,-2,1));
     Button pause=button("Ⅱ Pause");controls.addView(pause,new LinearLayout.LayoutParams(0,-2,1));
     Button reset=button("↺ Restart edited mix");controls.addView(reset,new LinearLayout.LayoutParams(0,-2,1));
     play.setOnClickListener(v->{if(tracks.isEmpty()){status.setText("Add an audio file first.");return;}if(!playing){playing=true;mixClockStartedAt=android.os.SystemClock.elapsedRealtime()-mixClockPositionMs;for(Track t:tracks)t.scheduledActive=false;status.setText("Playing mix with scheduled start times");}});
     pause.setOnClickListener(v->{mixClockPositionMs=mixPosition();playing=false;for(Track t:tracks){if(t.player.isPlaying())t.player.pause();t.scheduledActive=false;}status.setText("Paused");});
     reset.setOnClickListener(v->{playing=false;positionMix(0);status.setText("Reset to start");});
-    TextView timelineTitle=text("Mix position",14,true);timelineTitle.setPadding(0,14,0,4);root.addView(timelineTitle);
-    masterTime=text("0:00 / 0:00",14,false);root.addView(masterTime);
-    masterSeek=new SeekBar(this);masterSeek.setMax(1);root.addView(masterSeek);
+    TextView timelineTitle=text("Mix position",14,true);timelineTitle.setPadding(0,14,0,4);masterSection.addView(timelineTitle);
+    masterTime=text("0:00 / 0:00",14,false);masterSection.addView(masterTime);
+    masterSeek=new SeekBar(this);masterSeek.setMax(1);masterSection.addView(masterSeek);
     masterSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
       public void onProgressChanged(SeekBar bar,int value,boolean user){if(user){masterTime.setText(clock(value)+" / "+clock(getMixDuration()));}}
       public void onStartTrackingTouch(SeekBar bar){draggingMaster=true;}
       public void onStopTrackingTouch(SeekBar bar){int target=bar.getProgress();positionMix(target);draggingMaster=false;updateMasterTimeline();}
     });
-    Button saveProject=button("💾 Save Project (instant)");root.addView(saveProject);saveProject.setOnClickListener(v->saveProject());
-    Button openProject=button("📂 My Projects");root.addView(openProject);openProject.setOnClickListener(v->showProjects());
-    Button saveMix=button("⬇ Export WAV audio");root.addView(saveMix);
+    Button saveProject=button("💾 Save Project (instant)");masterSection.addView(saveProject);saveProject.setOnClickListener(v->saveProject());
+    Button openProject=button("📂 My Projects");masterSection.addView(openProject);openProject.setOnClickListener(v->showProjects());
+    Button saveMix=button("⬇ Export WAV audio");masterSection.addView(saveMix);
     saveMix.setOnClickListener(v->saveEditedAudio());
     status=text("Ready to import audio",14,false);status.setTextColor(0xffcbb5d5);status.setPadding(0,16,0,14);root.addView(status);
-    TextView title=text("Audio layers",23,true);title.setPadding(0,24,0,8);root.addView(title);
-    root.addView(add);
-    Button video=button("▣ Extract audio from video");root.addView(video);video.setOnClickListener(v->status.setText("Video extraction is not available in this build yet."));
-    trackList=new LinearLayout(this);trackList.setOrientation(1);root.addView(trackList);
-    TextView beatTitle=text("Binaural beat generator",24,true);beatTitle.setPadding(0,28,0,8);root.addView(beatTitle);
+    LinearLayout audioSection=collapsibleSection(root,"Audio layers",false);
+    audioSection.addView(add);
+    Button video=button("▣ Extract audio from video");audioSection.addView(video);video.setOnClickListener(v->status.setText("Video extraction is not available in this build yet."));
+    trackList=new LinearLayout(this);trackList.setOrientation(1);audioSection.addView(trackList);
+    LinearLayout rhythmSection=collapsibleSection(root,"Hismith rhythm guide",false);
     LinearLayout rhythmCard=new LinearLayout(this);rhythmCard.setOrientation(1);rhythmCard.setPadding(20,20,20,20);
-    GradientDrawable rhythmBg=new GradientDrawable();rhythmBg.setColor(0xff1e1e32);rhythmBg.setCornerRadius(28);rhythmCard.setBackground(rhythmBg);root.addView(rhythmCard);
+    GradientDrawable rhythmBg=new GradientDrawable();rhythmBg.setColor(0xff1e1e32);rhythmBg.setCornerRadius(28);rhythmCard.setBackground(rhythmBg);rhythmSection.addView(rhythmCard);
     TextView rhythmHeading=text("HISMITH STROKE RHYTHM",18,true);rhythmHeading.setTextColor(0xffb497ff);rhythmCard.addView(rhythmHeading);
     TextView rhythmDesc=text("Audible timing guide only. Does not connect to or control a device.",13,false);rhythmCard.addView(rhythmDesc);
     rhythmStatus=text("Rhythm guide stopped",14,false);rhythmStatus.setPadding(0,14,0,8);rhythmCard.addView(rhythmStatus);
@@ -119,9 +119,9 @@ public class MainActivity extends Activity {
     Spinner patterns=new Spinner(this);String[] names={"Steady pulse","Wave • rise and fall","Build • gradual acceleration"};ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);patterns.setAdapter(adapter);rhythmCard.addView(patterns);
     patterns.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){rhythmPattern=position;rhythmTick=0;}public void onNothingSelected(android.widget.AdapterView<?> parent){}});
 
-    TextView binauralTitle=text("Stereo binaural beat generator",23,true);binauralTitle.setPadding(0,26,0,10);root.addView(binauralTitle);
+    LinearLayout binauralSection=collapsibleSection(root,"Binaural beat generator",false);
     LinearLayout binCard=new LinearLayout(this);binCard.setOrientation(1);binCard.setPadding(20,20,20,20);
-    GradientDrawable binShape=new GradientDrawable();binShape.setColor(0xff1e1e32);binShape.setCornerRadius(24);binCard.setBackground(binShape);root.addView(binCard);
+    GradientDrawable binShape=new GradientDrawable();binShape.setColor(0xff1e1e32);binShape.setCornerRadius(24);binCard.setBackground(binShape);binauralSection.addView(binCard);
     CheckBox stereoSwitch=new CheckBox(this);stereoSwitch.setText("Enable stereo tones");stereoSwitch.setTextColor(Color.WHITE);binCard.addView(stereoSwitch);
     stereoSwitch.setOnCheckedChangeListener((stereoButton,on)->{stereoOn=on;startAtmosphereIfNeeded();});
     String[] binauralPresetNames={"Deep Rest • 2 Hz","Dreamy • 6 Hz","Calm • 10 Hz","Focused • 18 Hz","Energized • 36 Hz","Intimate • 7 Hz","Custom"};
@@ -136,9 +136,9 @@ public class MainActivity extends Activity {
     TextView stereoVol=text("Tone volume • 25%",14,false);binCard.addView(stereoVol);
     SeekBar stereoSlider=new SeekBar(this);stereoSlider.setMax(100);stereoSlider.setProgress(25);binCard.addView(stereoSlider);
     stereoSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){stereoVolume=p;stereoVol.setText("Tone volume • "+p+"%");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
-    TextView dreamTitle=text("Dream Sounds",23,true);dreamTitle.setPadding(0,26,0,10);root.addView(dreamTitle);
+    LinearLayout dreamSection=collapsibleSection(root,"Dream Sounds",false);
     LinearLayout dreamCard=new LinearLayout(this);dreamCard.setOrientation(1);dreamCard.setPadding(20,20,20,20);
-    GradientDrawable dreamShape=new GradientDrawable();dreamShape.setColor(0xff1e1e32);dreamShape.setCornerRadius(24);dreamCard.setBackground(dreamShape);root.addView(dreamCard);
+    GradientDrawable dreamShape=new GradientDrawable();dreamShape.setColor(0xff1e1e32);dreamShape.setCornerRadius(24);dreamCard.setBackground(dreamShape);dreamSection.addView(dreamCard);
     Spinner dreamPicker=new Spinner(this);dreamPicker.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Dark Drone","Ocean Drift","Airy Whisper","Soft Night Pulse"}));dreamCard.addView(dreamPicker);
     dreamPicker.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){atmosphereType=pos;}public void onNothingSelected(android.widget.AdapterView<?> p){}});
     TextView dreamVol=text("Dream volume • 20%",14,false);dreamCard.addView(dreamVol);
@@ -148,6 +148,18 @@ public class MainActivity extends Activity {
     dreamButton.setOnClickListener(v->{atmosphereOn=!atmosphereOn;startAtmosphereIfNeeded();dreamButton.setText(atmosphereOn?"■ Stop Dream Sounds":"▶ Start Dream Sounds");});
     dreamCard.addView(text("Synthesized sound textures. Use stereo headphones for binaural tones.",12,false));
     TextView foot=text("Clip editing, export, and Govee lighting are still being rebuilt.",13,false);foot.setTextColor(0xffb7a5be);foot.setPadding(0,28,0,0);root.addView(foot);
+  }
+  private LinearLayout collapsibleSection(LinearLayout parent,String title,boolean initiallyOpen){
+    LinearLayout section=new LinearLayout(this);section.setOrientation(1);
+    LinearLayout.LayoutParams sectionParams=new LinearLayout.LayoutParams(-1,-2);sectionParams.setMargins(0,14,0,0);parent.addView(section,sectionParams);
+    TextView header=text((initiallyOpen?"▾  ":"▸  ")+title,20,true);
+    header.setTextColor(Color.WHITE);header.setPadding(20,22,20,22);
+    GradientDrawable background=new GradientDrawable();background.setColor(0xff342440);background.setCornerRadius(20);header.setBackground(background);
+    section.addView(header);
+    LinearLayout content=new LinearLayout(this);content.setOrientation(1);content.setPadding(0,10,0,4);
+    section.addView(content);content.setVisibility(initiallyOpen?View.VISIBLE:View.GONE);
+    header.setOnClickListener(v->{boolean open=content.getVisibility()!=View.VISIBLE;content.setVisibility(open?View.VISIBLE:View.GONE);header.setText((open?"▾  ":"▸  ")+title);});
+    return content;
   }
   private TextView text(String s,int size,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.WHITE);if(bold)t.setTypeface(null,Typeface.BOLD);return t;}
   private Button button(String s){Button b=new Button(this);b.setText(s);b.setTextColor(Color.WHITE);b.setAllCaps(false);b.setTextSize(13);b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff5b346c));return b;}
