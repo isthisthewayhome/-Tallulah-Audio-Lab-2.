@@ -258,6 +258,34 @@ public class MainActivity extends Activity {
     }catch(Exception e){if(file!=null)file.delete();throw e;}
     finally{if(raw!=null)try{raw.close();}catch(Exception ignored){}if(codec!=null){try{codec.stop();}catch(Exception ignored){}codec.release();}ex.release();}
   }
+  private PcmExport normalizeForMix(PcmExport input)throws Exception{
+    if(input.rate==48000&&input.channels==2)return input;
+    if(input.rate<=0||(input.channels!=1&&input.channels!=2))throw new Exception("Only mono or stereo tracks are supported");
+    File normalized=File.createTempFile("tallulah_normalized_",".raw",getCacheDir());
+    long frames=(input.frames*48000L+input.rate-1)/input.rate;
+    try(RandomAccessFile in=new RandomAccessFile(input.file,"r");RandomAccessFile out=new RandomAccessFile(normalized,"rw")){
+      long cached=-1;int[] previous=new int[2],following=new int[2];
+      for(long i=0;i<frames;i++){
+        double source=i*(input.rate/48000.0);
+        long frame=Math.min(input.frames-1,(long)source);
+        double fraction=source-frame;
+        if(frame!=cached){
+          in.seek(frame*input.channels*2L);
+          for(int c=0;c<input.channels;c++){int lo=in.readUnsignedByte(),hi=in.readUnsignedByte();previous[c]=(short)(lo|(hi<<8));}
+          if(frame+1<input.frames){for(int c=0;c<input.channels;c++){int lo=in.readUnsignedByte(),hi=in.readUnsignedByte();following[c]=(short)(lo|(hi<<8));}}
+          else System.arraycopy(previous,0,following,0,input.channels);
+          cached=frame;
+        }
+        for(int c=0;c<2;c++){
+          int channel=input.channels==1?0:c;
+          int value=(int)Math.round(previous[channel]*(1-fraction)+following[channel]*fraction);
+          value=Math.max(-32768,Math.min(32767,value));
+          out.write(value&255);out.write((value>>8)&255);
+        }
+      }
+    }catch(Exception e){normalized.delete();throw e;}
+    PcmExport result=new PcmExport();result.file=normalized;result.rate=48000;result.channels=2;result.frames=frames;return result;
+  }
   private void saveTwoTrackMix(){
     Track first=tracks.get(0),second=tracks.get(1);
     if(first.loop.isChecked()||second.loop.isChecked()){status.setText("Turn off Loop on both tracks before exporting this test mix.");return;}
@@ -265,11 +293,12 @@ public class MainActivity extends Activity {
     final int[][] settings={{first.trimStartMs,first.trimEndMs,first.fadeInMs,first.fadeOutMs,first.volume.getProgress()},{second.trimStartMs,second.trimEndMs,second.fadeInMs,second.fadeOutMs,second.volume.getProgress()}};
     status.setText("Rendering two-track mix…");
     new Thread(()->{
-      PcmExport a=null,b=null;File wavFile=null;Uri destination=null;
+      PcmExport a=null,b=null,originalA=null,originalB=null;File wavFile=null;Uri destination=null;
       try{
         a=decodeForMix(sources[0],settings[0][0],settings[0][1],settings[0][2],settings[0][3],settings[0][4]);
         b=decodeForMix(sources[1],settings[1][0],settings[1][1],settings[1][2],settings[1][3],settings[1][4]);
-        if(a.rate!=b.rate||a.channels!=b.channels)throw new Exception("Tracks have different sample rates or channel counts. Matching formats are required in this test build.");
+        originalA=a;originalB=b;
+        a=normalizeForMix(originalA);b=normalizeForMix(originalB);
         long frames=Math.max(a.frames,b.frames),bytes=frames*a.channels*2L;
         if(bytes>0xffffffffL-36)throw new Exception("Mix exceeds WAV size limit");
         wavFile=File.createTempFile("tallulah_mix_",".wav",getCacheDir());
@@ -291,7 +320,7 @@ public class MainActivity extends Activity {
         values.clear();values.put(MediaStore.Audio.Media.IS_PENDING,0);getContentResolver().update(destination,values,null,null);
         runOnUiThread(()->status.setText("Two-track WAV saved to Music/Tallulah Audio Lab"));
       }catch(Exception e){if(destination!=null)getContentResolver().delete(destination,null,null);String message=e.getMessage();runOnUiThread(()->status.setText("Mix export failed: "+message));}
-      finally{if(a!=null)a.file.delete();if(b!=null)b.file.delete();if(wavFile!=null)wavFile.delete();}
+      finally{if(a!=null)a.file.delete();if(b!=null)b.file.delete();if(originalA!=null)originalA.file.delete();if(originalB!=null)originalB.file.delete();if(wavFile!=null)wavFile.delete();}
     },"TwoTrackExport").start();
   }
   private void saveEditedAudio(){
