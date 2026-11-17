@@ -9,6 +9,9 @@ import android.content.ContentValues
 import android.widget.*
 import android.view.View
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import org.tensorflow.lite.Interpreter
 import kotlin.math.*
 
 class MainActivity : Activity() {
@@ -30,6 +33,7 @@ class MainActivity : Activity() {
         addButton("Open") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type="image/*"; addCategory(Intent.CATEGORY_OPENABLE) },1) }
         addButton("Compare") { comparing = !comparing; image.setImageBitmap(if(comparing) source else result); message.text = if(comparing) "Showing original" else "Showing edited" }
         addButton("Save") { saveImage() }
+        addButton("AI 2×") { aiUpscale() }
         root.addView(bar)
         image = ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; setBackgroundColor(Color.DKGRAY) }
         root.addView(image,LinearLayout.LayoutParams(-1,0,1f))
@@ -125,6 +129,68 @@ class MainActivity : Activity() {
         comparing = false
         image.setImageBitmap(result)
         message.text="Edited: $w × $h. Maximum working dimension: 3072 px. Denoise is not AI restoration."
+    }
+
+    private fun aiUpscale() {
+        val bmp = result ?: run { message.text = "Open a photo first"; return }
+        val asset = try { assets.open("upscale_x2.tflite") } catch (_: Exception) {
+            message.text = "AI model not bundled yet. No fake upscale applied."
+            return
+        }
+        Thread {
+            try {
+                val bytes = asset.use { it.readBytes() }
+                val model = ByteBuffer.allocateDirect(bytes.size).order(ByteOrder.nativeOrder())
+                model.put(bytes)
+                model.rewind()
+                Interpreter(model).use { interpreter ->
+                    val inputShape = interpreter.getInputTensor(0).shape()
+                    val outputShape = interpreter.getOutputTensor(0).shape()
+                    require(inputShape.size == 4 && outputShape.size == 4 &&
+                        inputShape[0] == 1 && outputShape[0] == 1 &&
+                        inputShape[3] == 3 && outputShape[3] == 3 &&
+                        outputShape[1] == inputShape[1] * 2 &&
+                        outputShape[2] == inputShape[2] * 2) { "Model must be NHWC RGB 2×" }
+                    require(interpreter.getInputTensor(0).dataType().toString() == "FLOAT32" &&
+                        interpreter.getOutputTensor(0).dataType().toString() == "FLOAT32") {
+                        "Model must use float32 tensors"
+                    }
+                    val h = inputShape[1]; val w = inputShape[2]
+                    require(h > 0 && w > 0 && h * w <= 512 * 512) { "Unsupported model input dimensions" }
+                    val scaled = Bitmap.createScaledBitmap(bmp, w, h, true)
+                    val px = IntArray(w*h)
+                    scaled.getPixels(px, 0, w, 0, 0, w, h)
+                    val input = ByteBuffer.allocateDirect(w*h*3*4).order(ByteOrder.nativeOrder())
+                    for (p in px) {
+                        input.putFloat(Color.red(p)/255f)
+                        input.putFloat(Color.green(p)/255f)
+                        input.putFloat(Color.blue(p)/255f)
+                    }
+                    input.rewind()
+                    val oh = outputShape[1]; val ow = outputShape[2]
+                    val output = ByteBuffer.allocateDirect(ow*oh*3*4).order(ByteOrder.nativeOrder())
+                    interpreter.run(input, output)
+                    output.rewind()
+                    val out = IntArray(ow*oh)
+                    for (i in out.indices) {
+                        val r = (output.float.coerceIn(0f,1f)*255).roundToInt()
+                        val g = (output.float.coerceIn(0f,1f)*255).roundToInt()
+                        val b = (output.float.coerceIn(0f,1f)*255).roundToInt()
+                        out[i] = Color.rgb(r,g,b)
+                    }
+                    val enhanced = Bitmap.createBitmap(out, ow, oh, Bitmap.Config.ARGB_8888)
+                    runOnUiThread {
+                        result = enhanced
+                        comparing = false
+                        image.setImageBitmap(enhanced)
+                        message.text = "AI 2× output: ${ow} × ${oh}"
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { message.text = "AI processing unavailable: ${e.message}" }
+            }
+        }.start()
+        message.text = "Running offline AI model..."
     }
     private fun saveImage() {
         val bmp=result ?: run { message.text="Open a photo first"; return }
