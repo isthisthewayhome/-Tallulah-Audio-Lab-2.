@@ -53,39 +53,47 @@ public class MainActivity extends Activity {
   private int strokeOffsetPercent=0;
   private double preciseStrokeBps=0.0;
   private long strokeAnchorMs=0,strokeNextBeat=0;
+  private long strokeCycleIndex=0;
   private int rhythmBpm=40, rhythmVolume=75, rhythmPunch=100, rhythmPattern=0, rhythmTick=0, rhythmSound=0;
   private TextView rhythmStatus;
   private AudioTrack atmosphereTrack;
   private Thread atmosphereThread;
   private volatile boolean atmosphereOn=false, stereoOn=false;
   private volatile int atmosphereType=0, atmosphereVolume=20, stereoVolume=25, stereoBeat=6, stereoCarrier=180;
-  private long strokePeriodMs(){return Math.max(100,Math.round(1000.0/(preciseStrokeBps>0?preciseStrokeBps:Math.max(1,rhythmBpm)/60.0)));}
+  private double strokePeriodExactMs(){
+    return 1000.0/(preciseStrokeBps>0?preciseStrokeBps:Math.max(1,rhythmBpm)/60.0);
+  }
+  private long strokePeriodMs(){return Math.max(100,Math.round(strokePeriodExactMs()));}
+  private long strokeTargetMs(long cycle){
+    return strokeAnchorMs+Math.round((cycle+strokeOffsetPercent/100.0)*strokePeriodExactMs());
+  }
   private void resetStrokeClock(){
     strokeAnchorMs=android.os.SystemClock.uptimeMillis();
+    strokeCycleIndex=0;
     rescheduleStrokeClock();
   }
   private void rescheduleStrokeClock(){
-    long period=strokePeriodMs();
     long now=android.os.SystemClock.uptimeMillis();
-    long phase=strokeAnchorMs+Math.round(period*strokeOffsetPercent/100.0);
-    // Keep the original synchronization reference while nudging the phase.
-    // Do not restart the clock whenever the user moves the offset slider.
-    if(phase<now)phase+=((now-phase)/period+1)*period;
-    strokeNextBeat=phase;
+    double period=strokePeriodExactMs();
+    strokeCycleIndex=Math.max(0,(long)Math.ceil((now-strokeAnchorMs)/period-strokeOffsetPercent/100.0));
+    strokeNextBeat=strokeTargetMs(strokeCycleIndex);
     rhythmHandler.removeCallbacks(rhythmTask);
-    if(rhythmEnabled&&strokeSync)rhythmHandler.postDelayed(rhythmTask,Math.max(0,phase-now));
+    if(rhythmEnabled&&strokeSync)rhythmHandler.postDelayed(rhythmTask,Math.max(0,strokeNextBeat-now));
   }
   private final Runnable rhythmTask=new Runnable(){@Override public void run(){
     if(!rhythmEnabled)return;
     long now=android.os.SystemClock.uptimeMillis();
     if(strokeSync){
-      long period=strokePeriodMs();
-      if(strokeNextBeat==0)strokeNextBeat=now;
+      if(strokeNextBeat==0){resetStrokeClock();return;}
       if(now<strokeNextBeat){rhythmHandler.postDelayed(this,Math.max(1,strokeNextBeat-now));return;}
       try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}
-      // Keep phase anchored to the stroke cycle rather than drifting with UI delays.
-      long elapsed=Math.max(0,now-strokeNextBeat);
-      strokeNextBeat+=(elapsed/period+1)*period;
+      // Compute every target from the original anchor and fractional period.
+      // Skip late cycles instead of accumulating rounded-interval timing errors.
+      strokeCycleIndex++;
+      double period=strokePeriodExactMs();
+      long minCycle=Math.max(0,(long)Math.floor((now-strokeAnchorMs)/period-strokeOffsetPercent/100.0)+1);
+      if(strokeCycleIndex<minCycle)strokeCycleIndex=minCycle;
+      strokeNextBeat=strokeTargetMs(strokeCycleIndex);
       if(rhythmStatus!=null)rhythmStatus.setText(String.format(java.util.Locale.US,"Stroke Sync • %.2f cycles/sec • one cue per cycle",preciseStrokeBps>0?preciseStrokeBps:rhythmBpm/60.0));
       rhythmHandler.postDelayed(this,Math.max(1,strokeNextBeat-android.os.SystemClock.uptimeMillis()));
       return;
