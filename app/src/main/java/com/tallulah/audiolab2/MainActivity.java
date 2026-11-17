@@ -215,9 +215,89 @@ public class MainActivity extends Activity {
     masterSeek.setMax(Math.max(1,duration));masterSeek.setProgress(Math.min(position,duration));
     masterTime.setText(clock(position)+" / "+clock(duration));
   }
+  private static class PcmExport {
+    File file;int rate,channels;long frames;
+  }
+  private PcmExport decodeForMix(Uri source,int startMs,int endMs,int fadeInMs,int fadeOutMs,int volume)throws Exception{
+    MediaExtractor ex=new MediaExtractor();MediaCodec codec=null;RandomAccessFile raw=null;File file=null;
+    try{
+      ex.setDataSource(this,source,null);int index=-1;MediaFormat fmt=null;
+      for(int i=0;i<ex.getTrackCount();i++){MediaFormat f=ex.getTrackFormat(i);String mime=f.getString(MediaFormat.KEY_MIME);if(mime!=null&&mime.startsWith("audio/")){index=i;fmt=f;break;}}
+      if(index<0)throw new Exception("Audio stream missing");
+      ex.selectTrack(index);codec=MediaCodec.createDecoderByType(fmt.getString(MediaFormat.KEY_MIME));codec.configure(fmt,null,null,0);codec.start();
+      ex.seekTo(startMs*1000L,MediaExtractor.SEEK_TO_PREVIOUS_SYNC);
+      file=File.createTempFile("tallulah_pcm_",".raw",getCacheDir());raw=new RandomAccessFile(file,"rw");
+      int rate=fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE),channels=fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+      long frames=0;boolean inDone=false,outDone=false;MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
+      while(!outDone){
+        if(!inDone){int idx=codec.dequeueInputBuffer(10000);if(idx>=0){ByteBuffer input=codec.getInputBuffer(idx);input.clear();int n=ex.readSampleData(input,0);long pts=ex.getSampleTime();if(n<0||pts>=endMs*1000L){codec.queueInputBuffer(idx,0,0,0,MediaCodec.BUFFER_FLAG_END_OF_STREAM);inDone=true;}else{codec.queueInputBuffer(idx,0,n,Math.max(0,pts),0);ex.advance();}}}
+        int idx=codec.dequeueOutputBuffer(info,10000);
+        if(idx==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){
+          MediaFormat out=codec.getOutputFormat();rate=out.getInteger(MediaFormat.KEY_SAMPLE_RATE);channels=out.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+          if(out.containsKey(MediaFormat.KEY_PCM_ENCODING)&&out.getInteger(MediaFormat.KEY_PCM_ENCODING)!=2)throw new Exception("Only 16-bit decoded audio is supported");
+        }else if(idx>=0){
+          if(info.size>0){
+            ByteBuffer buf=codec.getOutputBuffer(idx);buf.position(info.offset);buf.limit(info.offset+info.size);
+            int frameSize=channels*2;byte[] data=new byte[info.size];buf.get(data);
+            for(int j=0;j+frameSize<=data.length;j+=frameSize){
+              long time=info.presentationTimeUs+(long)(j/frameSize)*1000000L/rate;
+              if(time<startMs*1000L||time>=endMs*1000L)continue;
+              float gain=volume/100f;
+              if(fadeInMs>0)gain*=Math.max(0f,Math.min(1f,(time-startMs*1000L)/(fadeInMs*1000f)));
+              if(fadeOutMs>0)gain*=Math.max(0f,Math.min(1f,(endMs*1000L-time)/(fadeOutMs*1000f)));
+              for(int c=0;c<channels;c++){int p=j+c*2;short sample=(short)((data[p]&255)|(data[p+1]<<8));int value=Math.max(-32768,Math.min(32767,Math.round(sample*gain)));raw.write(value&255);raw.write((value>>8)&255);}
+              frames++;
+            }
+          }
+          if((info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0)outDone=true;
+          codec.releaseOutputBuffer(idx,false);
+        }
+      }
+      if(frames==0)throw new Exception("One track decoded no audio");
+      PcmExport result=new PcmExport();result.file=file;result.rate=rate;result.channels=channels;result.frames=frames;return result;
+    }catch(Exception e){if(file!=null)file.delete();throw e;}
+    finally{if(raw!=null)try{raw.close();}catch(Exception ignored){}if(codec!=null){try{codec.stop();}catch(Exception ignored){}codec.release();}ex.release();}
+  }
+  private void saveTwoTrackMix(){
+    Track first=tracks.get(0),second=tracks.get(1);
+    if(first.loop.isChecked()||second.loop.isChecked()){status.setText("Turn off Loop on both tracks before exporting this test mix.");return;}
+    final Uri[] sources={first.uri,second.uri};
+    final int[][] settings={{first.trimStartMs,first.trimEndMs,first.fadeInMs,first.fadeOutMs,first.volume.getProgress()},{second.trimStartMs,second.trimEndMs,second.fadeInMs,second.fadeOutMs,second.volume.getProgress()}};
+    status.setText("Rendering two-track mix…");
+    new Thread(()->{
+      PcmExport a=null,b=null;File wavFile=null;Uri destination=null;
+      try{
+        a=decodeForMix(sources[0],settings[0][0],settings[0][1],settings[0][2],settings[0][3],settings[0][4]);
+        b=decodeForMix(sources[1],settings[1][0],settings[1][1],settings[1][2],settings[1][3],settings[1][4]);
+        if(a.rate!=b.rate||a.channels!=b.channels)throw new Exception("Tracks have different sample rates or channel counts. Matching formats are required in this test build.");
+        long frames=Math.max(a.frames,b.frames),bytes=frames*a.channels*2L;
+        if(bytes>0xffffffffL-36)throw new Exception("Mix exceeds WAV size limit");
+        wavFile=File.createTempFile("tallulah_mix_",".wav",getCacheDir());
+        try(RandomAccessFile wav=new RandomAccessFile(wavFile,"rw");RandomAccessFile ra=new RandomAccessFile(a.file,"r");RandomAccessFile rb=new RandomAccessFile(b.file,"r")){
+          wav.writeBytes("RIFF");writeLe(wav,(int)(36+bytes));wav.writeBytes("WAVEfmt ");writeLe(wav,16);writeShortLe(wav,1);writeShortLe(wav,a.channels);writeLe(wav,a.rate);writeLe(wav,a.rate*a.channels*2);writeShortLe(wav,a.channels*2);writeShortLe(wav,16);wav.writeBytes("data");writeLe(wav,(int)bytes);
+          int block=4096;byte[] left=new byte[block*a.channels*2],right=new byte[left.length],mixed=new byte[left.length];
+          for(long offset=0;offset<frames;offset+=block){
+            int n=(int)Math.min(block,frames-offset),size=n*a.channels*2;
+            java.util.Arrays.fill(left,(byte)0);java.util.Arrays.fill(right,(byte)0);
+            int l=(int)Math.min(size,Math.max(0,(a.frames-offset)*a.channels*2));if(l>0)ra.readFully(left,0,l);
+            int r=(int)Math.min(size,Math.max(0,(b.frames-offset)*b.channels*2));if(r>0)rb.readFully(right,0,r);
+            for(int i=0;i<size;i+=2){short x=(short)((left[i]&255)|(left[i+1]<<8)),y=(short)((right[i]&255)|(right[i+1]<<8));int sum=Math.max(-32768,Math.min(32767,x+y));mixed[i]=(byte)sum;mixed[i+1]=(byte)(sum>>8);}
+            wav.write(mixed,0,size);
+          }
+        }
+        ContentValues values=new ContentValues();values.put(MediaStore.Audio.Media.DISPLAY_NAME,"Tallulah_TwoTrack_"+System.currentTimeMillis()+".wav");values.put(MediaStore.Audio.Media.MIME_TYPE,"audio/wav");values.put(MediaStore.Audio.Media.RELATIVE_PATH,"Music/Tallulah Audio Lab");values.put(MediaStore.Audio.Media.IS_PENDING,1);
+        destination=getContentResolver().insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,values);if(destination==null)throw new Exception("Unable to create saved file");
+        try(InputStream in=new java.io.FileInputStream(wavFile);OutputStream out=getContentResolver().openOutputStream(destination)){if(out==null)throw new Exception("Unable to write saved file");byte[] buf=new byte[32768];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);}
+        values.clear();values.put(MediaStore.Audio.Media.IS_PENDING,0);getContentResolver().update(destination,values,null,null);
+        runOnUiThread(()->status.setText("Two-track WAV saved to Music/Tallulah Audio Lab"));
+      }catch(Exception e){if(destination!=null)getContentResolver().delete(destination,null,null);String message=e.getMessage();runOnUiThread(()->status.setText("Mix export failed: "+message));}
+      finally{if(a!=null)a.file.delete();if(b!=null)b.file.delete();if(wavFile!=null)wavFile.delete();}
+    },"TwoTrackExport").start();
+  }
   private void saveEditedAudio(){
     if(tracks.isEmpty()){status.setText("Add audio before saving.");return;}
-    if(tracks.size()!=1){status.setText("Multi-layer export is next. This version exports one edited layer.");return;}
+    if(tracks.size()==2){saveTwoTrackMix();return;}
+    if(tracks.size()!=1){status.setText("This test build supports one or two tracks.");return;}
     Track t=tracks.get(0);
     status.setText("Rendering edited audio…");
     final Uri source=t.uri;
