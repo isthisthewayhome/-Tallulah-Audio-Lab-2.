@@ -162,9 +162,9 @@ class MainActivity : Activity() {
                     scaled.getPixels(px, 0, w, 0, 0, w, h)
                     val input = ByteBuffer.allocateDirect(w*h*3*4).order(ByteOrder.nativeOrder())
                     for (p in px) {
-                        input.putFloat(Color.red(p)/255f)
-                        input.putFloat(Color.green(p)/255f)
-                        input.putFloat(Color.blue(p)/255f)
+                        input.putFloat(Color.red(p).toFloat())
+                        input.putFloat(Color.green(p).toFloat())
+                        input.putFloat(Color.blue(p).toFloat())
                     }
                     input.rewind()
                     val oh = outputShape[1]; val ow = outputShape[2]
@@ -173,7 +173,7 @@ class MainActivity : Activity() {
                     output.rewind()
                     val out = IntArray(ow*oh)
                     for (i in out.indices) {
-                        val r = (output.float.coerceIn(0f,1f)*255).roundToInt()
+                        val r = output.float.coerceIn(0f,255f).roundToInt()
                         val g = (output.float.coerceIn(0f,1f)*255).roundToInt()
                         val b = (output.float.coerceIn(0f,1f)*255).roundToInt()
                         out[i] = Color.rgb(r,g,b)
