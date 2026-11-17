@@ -25,6 +25,17 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Fetch pretrained ESRGAN 4x model
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --output /tmp/esrgan.tar.gz 'https://www.kaggle.com/models/kaggle/esrgan-tf2/TfLite/esrgan-tf2/1/download/'
+          mkdir -p /tmp/esrgan-unpack app/src/main/assets
+          tar -xzf /tmp/esrgan.tar.gz -C /tmp/esrgan-unpack
+          find /tmp/esrgan-unpack -type f -name '*.tflite' -print
+          model="$(find /tmp/esrgan-unpack -type f -name '*.tflite' -print -quit)"
+          test -n "$model"
+          cp "$model" app/src/main/assets/upscale_x4.tflite
+          test "$(stat -c%s app/src/main/assets/upscale_x4.tflite)" -gt 100000
       - name: Build APK
         run: gradle --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4
