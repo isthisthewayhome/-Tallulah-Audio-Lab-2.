@@ -75,7 +75,7 @@ public class MainActivity extends Activity {
     Button play=button("▶ Play mix");controls.addView(play,new LinearLayout.LayoutParams(0,-2,1));
     Button pause=button("Ⅱ Pause");controls.addView(pause,new LinearLayout.LayoutParams(0,-2,1));
     Button reset=button("↺ Restart edited mix");controls.addView(reset,new LinearLayout.LayoutParams(0,-2,1));
-    play.setOnClickListener(v->{if(tracks.isEmpty()){status.setText("Add an audio file first.");return;}int count=0;for(Track t:tracks){try{if(!hasSolo()||t.solo){if(t.player.getCurrentPosition()>=t.trimEndMs)t.player.seekTo(t.trimStartMs);t.player.start();count++;}}catch(Exception e){status.setText("Playback error: "+e.getMessage());}}if(count>0){playing=true;status.setText("Playing "+count+" track(s)");}});
+    play.setOnClickListener(v->{if(tracks.isEmpty()){status.setText("Add an audio file first.");return;}int count=0;for(Track t:tracks){try{if(!hasSolo()||t.solo){if(t.player.getCurrentPosition()>=t.trimEndMs)t.player.seekTo(t.trimStartMs);updateVolumes();t.player.start();count++;}}catch(Exception e){status.setText("Playback error: "+e.getMessage());}}if(count>0){playing=true;status.setText("Playing "+count+" track(s)");}});
     pause.setOnClickListener(v->{for(Track t:tracks)if(t.player.isPlaying())t.player.pause();playing=false;status.setText("Paused");});
     reset.setOnClickListener(v->{for(Track t:tracks){t.player.pause();t.player.seekTo(t.trimStartMs);}playing=false;status.setText("Reset to start");});
     TextView timelineTitle=text("Mix position",14,true);timelineTitle.setPadding(0,14,0,4);root.addView(timelineTitle);
@@ -172,7 +172,7 @@ public class MainActivity extends Activity {
       LinearLayout row=new LinearLayout(this);row.setOrientation(0);card.addView(row);
       CheckBox loop=new CheckBox(this);loop.setText("Loop");loop.setTextColor(Color.WHITE);row.addView(loop);t.loop=loop;loop.setOnCheckedChangeListener((b,on)->{boolean whole=t.trimStartMs==0 && t.trimEndMs>=player.getDuration()-150;player.setLooping(on&&whole);});
       player.setOnCompletionListener(mp->{if(t.loop!=null&&t.loop.isChecked()){try{mp.seekTo(t.trimStartMs);mp.start();}catch(Exception e){status.setText("Loop error: "+e.getMessage());}}});
-      Button solo=button("▶ Track");row.addView(solo);solo.setOnClickListener(v->{if(player.isPlaying()){player.pause();solo.setText("▶ Track");}else{player.start();solo.setText("Ⅱ Track");}});
+      Button solo=button("▶ Track");row.addView(solo);solo.setOnClickListener(v->{if(player.isPlaying()){player.pause();solo.setText("▶ Track");}else{updateVolumes();player.start();solo.setText("Ⅱ Track");}});
       Button mute=button("Mute");row.addView(mute);mute.setOnClickListener(v->{t.muted=!t.muted;mute.setText(t.muted?"Unmute":"Mute");updateVolumes();});
       Button isolate=button("Solo");row.addView(isolate);isolate.setOnClickListener(v->{t.solo=!t.solo;isolate.setText(t.solo?"Unsolo":"Solo");updateVolumes();});
       TextView seekTitle=text("Track progress • 0:00 / "+clock(t.trimEndMs-t.trimStartMs),13,false);card.addView(seekTitle);t.progressLabel=seekTitle;
@@ -214,7 +214,7 @@ public class MainActivity extends Activity {
     fadeIn.setOnSeekBarChangeListener(change);fadeOut.setOnSeekBarChangeListener(change);refresh.run();
     new android.app.AlertDialog.Builder(this).setTitle("Playback fades").setView(layout).setNegativeButton("Cancel",null).setPositiveButton("Apply",(d,w)->{
       t.fadeInMs=fadeIn.getProgress()*1000;t.fadeOutMs=fadeOut.getProgress()*1000;
-      updateVolumes();status.setText("Fades set: in "+(t.fadeInMs/1000)+"s • out "+(t.fadeOutMs/1000)+"s");
+      updateVolumes();status.setText("Fades active: in "+(t.fadeInMs/1000)+"s • out "+(t.fadeOutMs/1000)+"s. Restart track to hear fade-in.");
     }).show();
   }
   private int getMixDuration(){int max=0;for(Track t:tracks)max=Math.max(max,t.trimEndMs-t.trimStartMs);return max;}
@@ -554,17 +554,21 @@ public class MainActivity extends Activity {
   private void writeLe(RandomAccessFile f,int value)throws Exception{for(int i=0;i<4;i++)f.write((value>>(i*8))&255);}
   private void writeShortLe(RandomAccessFile f,int value)throws Exception{f.write(value&255);f.write((value>>8)&255);}
   private boolean hasSolo(){for(Track t:tracks)if(t.solo)return true;return false;}
-  private void updateVolumes(){boolean any=hasSolo();for(Track t:tracks){
-    float v=(t.muted||(any&&!t.solo))?0:t.volume.getProgress()/100f;
-    try{
-      if(t.player.isPlaying()){
-        int pos=t.player.getCurrentPosition(),end=t.trimEndMs;
-        if(t.fadeInMs>0)v*=Math.max(0f,Math.min(1f,(pos-t.trimStartMs)/(float)t.fadeInMs));
-        if(t.fadeOutMs>0)v*=Math.max(0f,Math.min(1f,(end-pos)/(float)t.fadeOutMs));
-      }
-      t.player.setVolume(v,v);
-    }catch(Exception ignored){}
-  }}
+  private void updateVolumes(){
+    boolean any=hasSolo();
+    for(Track t:tracks){
+      try{
+        float volume=(t.muted||(any&&!t.solo))?0f:t.volume.getProgress()/100f;
+        int length=Math.max(1,t.trimEndMs-t.trimStartMs);
+        int position=Math.max(0,Math.min(length,t.player.getCurrentPosition()-t.trimStartMs));
+        // Fade gain is relative to the active clip, not the source file.
+        // Apply even while paused so restarting at zero never leaks full volume.
+        if(t.fadeInMs>0)volume*=Math.min(1f,position/(float)t.fadeInMs);
+        if(t.fadeOutMs>0)volume*=Math.min(1f,(length-position)/(float)t.fadeOutMs);
+        t.player.setVolume(Math.max(0f,volume),Math.max(0f,volume));
+      }catch(Exception ignored){}
+    }
+  }
   private void seekAll(int delta){for(Track t:tracks){int target=Math.max(0,Math.min(t.player.getDuration(),t.player.getCurrentPosition()+delta));t.player.seekTo(target);}}
 
   private synchronized void startAtmosphereIfNeeded(){
