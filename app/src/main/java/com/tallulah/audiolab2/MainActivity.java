@@ -61,9 +61,18 @@ public class MainActivity extends Activity {
   private long strokePeriodMs(){return Math.max(100,Math.round(60000.0/Math.max(1,rhythmBpm)));}
   private void resetStrokeClock(){
     strokeAnchorMs=android.os.SystemClock.uptimeMillis();
-    strokeNextBeat=strokeAnchorMs+(strokePeriodMs()*strokeOffsetPercent/100);
+    rescheduleStrokeClock();
+  }
+  private void rescheduleStrokeClock(){
+    long period=strokePeriodMs();
+    long now=android.os.SystemClock.uptimeMillis();
+    long phase=strokeAnchorMs+Math.round(period*strokeOffsetPercent/100.0);
+    // Keep the original synchronization reference while nudging the phase.
+    // Do not restart the clock whenever the user moves the offset slider.
+    if(phase<now)phase+=((now-phase)/period+1)*period;
+    strokeNextBeat=phase;
     rhythmHandler.removeCallbacks(rhythmTask);
-    if(rhythmEnabled)rhythmHandler.post(rhythmTask);
+    if(rhythmEnabled&&strokeSync)rhythmHandler.postDelayed(rhythmTask,Math.max(0,phase-now));
   }
   private final Runnable rhythmTask=new Runnable(){@Override public void run(){
     if(!rhythmEnabled)return;
@@ -158,8 +167,13 @@ public class MainActivity extends Activity {
     faster.setOnClickListener(v->tempoSlider.setProgress(Math.min(tempoSlider.getMax(),tempoSlider.getProgress()+1)));
     CheckBox strokeMode=new CheckBox(this);strokeMode.setText("Stroke Sync • one beat per full back-and-forth cycle");strokeMode.setTextColor(Color.WHITE);rhythmCard.addView(strokeMode);
     TextView offsetLabel=text("Sync offset • 0% of stroke cycle",14,false);rhythmCard.addView(offsetLabel);
-    SeekBar offsetSlider=new SeekBar(this);offsetSlider.setMax(100);offsetSlider.setProgress(0);offsetSlider.setMinHeight(dp(60));rhythmCard.addView(offsetSlider);
-    TextView syncHelp=text("Match BPS to complete strokes/sec. Use offset to shift the cue within each cycle, then tap Sync Now at a repeatable point in the motion. Manual timing only; no device connection.",13,false);rhythmCard.addView(syncHelp);
+    LinearLayout offsetRow=new LinearLayout(this);offsetRow.setOrientation(LinearLayout.HORIZONTAL);offsetRow.setGravity(android.view.Gravity.CENTER_VERTICAL);rhythmCard.addView(offsetRow);
+    Button offsetMinus=button("−");offsetRow.addView(offsetMinus,new LinearLayout.LayoutParams(dp(64),dp(64)));
+    SeekBar offsetSlider=new SeekBar(this);offsetSlider.setMax(99);offsetSlider.setProgress(0);offsetSlider.setMinHeight(dp(64));offsetSlider.setPadding(dp(14),dp(12),dp(14),dp(12));offsetRow.addView(offsetSlider,new LinearLayout.LayoutParams(0,dp(72),1));
+    Button offsetPlus=button("+");offsetRow.addView(offsetPlus,new LinearLayout.LayoutParams(dp(64),dp(64)));
+    offsetMinus.setOnClickListener(v->offsetSlider.setProgress(Math.max(0,offsetSlider.getProgress()-1)));
+    offsetPlus.setOnClickListener(v->offsetSlider.setProgress(Math.min(offsetSlider.getMax(),offsetSlider.getProgress()+1)));
+    TextView syncHelp=text("Match BPS to complete strokes/sec. Tap Sync Now at a repeatable point in the motion, then adjust the offset using the slider or − / + buttons without restarting synchronization. Manual timing only; no device connection.",13,false);rhythmCard.addView(syncHelp);
     Button syncNow=button("◎ Sync Now");rhythmCard.addView(syncNow);
     strokeMode.setOnCheckedChangeListener((button,checked)->{
       strokeSync=checked;
@@ -169,12 +183,12 @@ public class MainActivity extends Activity {
     offsetSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
       public void onProgressChanged(SeekBar bar,int progress,boolean fromUser){
         strokeOffsetPercent=progress;offsetLabel.setText("Sync offset • "+progress+"% of stroke cycle");
-        if(fromUser&&strokeSync)resetStrokeClock();
+        if(strokeSync)rescheduleStrokeClock();
       }
       public void onStartTrackingTouch(SeekBar bar){}
       public void onStopTrackingTouch(SeekBar bar){}
     });
-    syncNow.setOnClickListener(v->{if(!strokeSync){strokeMode.setChecked(true);}resetStrokeClock();rhythmStatus.setText("Stroke Sync aligned • one cue per full cycle");});
+    syncNow.setOnClickListener(v->{if(!strokeSync){strokeMode.setChecked(true);}resetStrokeClock();rhythmStatus.setText("Sync reference reset • fine-tune offset with − / +");});
     TextView soundLabel=text("Rhythm sound",16,true);rhythmCard.addView(soundLabel);
     Spinner soundPicker=new Spinner(this);
     String[] soundNames={"Original Soft Thump","Deep Bass","Heartbeat","Sharp Tap","Electronic Pulse"};
