@@ -49,14 +49,44 @@ public class MainActivity extends Activity {
   private final Runnable clipMonitor=new Runnable(){public void run(){if(playing){int now=mixPosition();for(Track t:tracks){try{int local=now-t.startAtMs;if(local>=0&&local<t.trimEndMs-t.trimStartMs&&!t.scheduledActive&&(!hasSolo()||t.solo)){t.player.seekTo(t.trimStartMs+local);updateVolumes();t.player.start();t.scheduledActive=true;}if(local>=t.trimEndMs-t.trimStartMs&&t.scheduledActive&&!t.loop.isChecked()){t.player.pause();t.scheduledActive=false;}}catch(Exception ignored){}}if(now>=getMixDuration()){playing=false;mixClockPositionMs=getMixDuration();}}for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}updateVolumes();updateMasterTimeline();updateTrackProgress();clipHandler.postDelayed(this,80);}};
   private final Handler rhythmHandler = new Handler(Looper.getMainLooper());
   private AudioTrack rhythmTone;
-  private boolean rhythmEnabled=false;
+  private boolean rhythmEnabled=false,strokeSync=false;
+  private int strokeOffsetPercent=0;
+  private long strokeAnchorMs=0,strokeNextBeat=0;
   private int rhythmBpm=40, rhythmVolume=75, rhythmPunch=100, rhythmPattern=0, rhythmTick=0, rhythmSound=0;
   private TextView rhythmStatus;
   private AudioTrack atmosphereTrack;
   private Thread atmosphereThread;
   private volatile boolean atmosphereOn=false, stereoOn=false;
   private volatile int atmosphereType=0, atmosphereVolume=20, stereoVolume=25, stereoBeat=6, stereoCarrier=180;
-  private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,Math.min(600,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));if(rhythmPattern==2)bpm=Math.min(600,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText(String.format(java.util.Locale.US,"Rhythm guide • %.1f beats/sec • audible cue",bpm/60.0));rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
+  private long strokePeriodMs(){return Math.max(100,Math.round(60000.0/Math.max(1,rhythmBpm)));}
+  private void resetStrokeClock(){
+    strokeAnchorMs=android.os.SystemClock.uptimeMillis();
+    strokeNextBeat=strokeAnchorMs+(strokePeriodMs()*strokeOffsetPercent/100);
+    rhythmHandler.removeCallbacks(rhythmTask);
+    if(rhythmEnabled)rhythmHandler.post(rhythmTask);
+  }
+  private final Runnable rhythmTask=new Runnable(){@Override public void run(){
+    if(!rhythmEnabled)return;
+    long now=android.os.SystemClock.uptimeMillis();
+    if(strokeSync){
+      long period=strokePeriodMs();
+      if(strokeNextBeat==0)strokeNextBeat=now;
+      if(now<strokeNextBeat){rhythmHandler.postDelayed(this,Math.max(1,strokeNextBeat-now));return;}
+      try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}
+      // Keep phase anchored to the stroke cycle rather than drifting with UI delays.
+      long elapsed=Math.max(0,now-strokeNextBeat);
+      strokeNextBeat+=(elapsed/period+1)*period;
+      if(rhythmStatus!=null)rhythmStatus.setText(String.format(java.util.Locale.US,"Stroke Sync • %.1f cycles/sec • one cue per cycle",rhythmBpm/60.0));
+      rhythmHandler.postDelayed(this,Math.max(1,strokeNextBeat-android.os.SystemClock.uptimeMillis()));
+      return;
+    }
+    try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}
+    rhythmTick++;int bpm=rhythmBpm;
+    if(rhythmPattern==1)bpm=Math.max(15,Math.min(600,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));
+    if(rhythmPattern==2)bpm=Math.min(600,rhythmBpm+rhythmTick/4);
+    if(rhythmStatus!=null)rhythmStatus.setText(String.format(java.util.Locale.US,"Rhythm guide • %.1f beats/sec • audible cue",bpm/60.0));
+    rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));
+  }};
   private final int bg = Color.rgb(16,13,24), panel = Color.rgb(34,25,45), accent = Color.rgb(187,115,213);
   private static class Track {
     MediaPlayer player; Uri uri; SeekBar volume; SeekBar speed; SeekBar progress; TextView progressLabel; boolean draggingProgress=false; CheckBox loop; TextView label; LinearLayout card; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0,fadeInMs=0,fadeOutMs=0,startAtMs=0; boolean scheduledActive=false; TextView startLabel;
@@ -106,7 +136,7 @@ public class MainActivity extends Activity {
     TextView rhythmDesc=text("Audible timing guide only. Does not connect to or control a device.",13,false);rhythmCard.addView(rhythmDesc);
     rhythmStatus=text("Rhythm guide stopped",14,false);rhythmStatus.setPadding(0,14,0,8);rhythmCard.addView(rhythmStatus);
     Button rhythmToggle=button("▶ Start rhythm guide");rhythmCard.addView(rhythmToggle);
-    rhythmToggle.setOnClickListener(v->{rhythmEnabled=!rhythmEnabled;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmEnabled){rhythmTick=0;resetRhythmTone();rhythmHandler.post(rhythmTask);rhythmToggle.setText("■ Stop rhythm guide");}else{rhythmToggle.setText("▶ Start rhythm guide");rhythmStatus.setText("Rhythm guide stopped");}});
+    rhythmToggle.setOnClickListener(v->{rhythmEnabled=!rhythmEnabled;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmEnabled){rhythmTick=0;resetRhythmTone();if(strokeSync)resetStrokeClock();else rhythmHandler.post(rhythmTask);rhythmToggle.setText("■ Stop rhythm guide");}else{rhythmToggle.setText("▶ Start rhythm guide");rhythmStatus.setText("Rhythm guide stopped");if(rhythmTone!=null)try{rhythmTone.pause();}catch(Exception ignored){}}});
     TextView tempo=text("Beats per second • 0.7",18,true);rhythmCard.addView(tempo);
     TextView tempoHint=text("0.5–10.0 beats/sec • drag the large slider or tap − / +",13,false);rhythmCard.addView(tempoHint);
     LinearLayout tempoRow=new LinearLayout(this);tempoRow.setOrientation(LinearLayout.HORIZONTAL);tempoRow.setGravity(android.view.Gravity.CENTER_VERTICAL);rhythmCard.addView(tempoRow);
@@ -119,13 +149,32 @@ public class MainActivity extends Activity {
         double beatsPerSecond=(p+5)/10.0;
         rhythmBpm=(int)Math.round(beatsPerSecond*60);
         tempo.setText(String.format(java.util.Locale.US,"Beats per second • %.1f",beatsPerSecond));
-        if(user&&rhythmEnabled){rhythmHandler.removeCallbacks(rhythmTask);rhythmHandler.post(rhythmTask);}
+        if(user&&rhythmEnabled){if(strokeSync)resetStrokeClock();else{rhythmHandler.removeCallbacks(rhythmTask);rhythmHandler.post(rhythmTask);}}
       }
       public void onStartTrackingTouch(SeekBar b){}
       public void onStopTrackingTouch(SeekBar b){}
     });
     slower.setOnClickListener(v->tempoSlider.setProgress(Math.max(0,tempoSlider.getProgress()-1)));
     faster.setOnClickListener(v->tempoSlider.setProgress(Math.min(tempoSlider.getMax(),tempoSlider.getProgress()+1)));
+    CheckBox strokeMode=new CheckBox(this);strokeMode.setText("Stroke Sync • one beat per full back-and-forth cycle");strokeMode.setTextColor(Color.WHITE);rhythmCard.addView(strokeMode);
+    TextView offsetLabel=text("Sync offset • 0% of stroke cycle",14,false);rhythmCard.addView(offsetLabel);
+    SeekBar offsetSlider=new SeekBar(this);offsetSlider.setMax(100);offsetSlider.setProgress(0);offsetSlider.setMinHeight(dp(60));rhythmCard.addView(offsetSlider);
+    TextView syncHelp=text("Match BPS to complete strokes/sec. Use offset to shift the cue within each cycle, then tap Sync Now at a repeatable point in the motion. Manual timing only; no device connection.",13,false);rhythmCard.addView(syncHelp);
+    Button syncNow=button("◎ Sync Now");rhythmCard.addView(syncNow);
+    strokeMode.setOnCheckedChangeListener((button,checked)->{
+      strokeSync=checked;
+      if(strokeSync){resetStrokeClock();}
+      else{rhythmHandler.removeCallbacks(rhythmTask);if(rhythmEnabled)rhythmHandler.post(rhythmTask);}
+    });
+    offsetSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar bar,int progress,boolean fromUser){
+        strokeOffsetPercent=progress;offsetLabel.setText("Sync offset • "+progress+"% of stroke cycle");
+        if(fromUser&&strokeSync)resetStrokeClock();
+      }
+      public void onStartTrackingTouch(SeekBar bar){}
+      public void onStopTrackingTouch(SeekBar bar){}
+    });
+    syncNow.setOnClickListener(v->{if(!strokeSync){strokeMode.setChecked(true);}resetStrokeClock();rhythmStatus.setText("Stroke Sync aligned • one cue per full cycle");});
     TextView soundLabel=text("Rhythm sound",16,true);rhythmCard.addView(soundLabel);
     Spinner soundPicker=new Spinner(this);
     String[] soundNames={"Original Soft Thump","Deep Bass","Heartbeat","Sharp Tap","Electronic Pulse"};
