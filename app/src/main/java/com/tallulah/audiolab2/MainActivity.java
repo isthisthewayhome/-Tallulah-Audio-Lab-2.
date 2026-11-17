@@ -51,6 +51,7 @@ public class MainActivity extends Activity {
   private AudioTrack rhythmTone;
   private boolean rhythmEnabled=false,strokeSync=false;
   private int strokeOffsetPercent=0;
+  private double preciseStrokeBps=0.0;
   private long strokeAnchorMs=0,strokeNextBeat=0;
   private int rhythmBpm=40, rhythmVolume=75, rhythmPunch=100, rhythmPattern=0, rhythmTick=0, rhythmSound=0;
   private TextView rhythmStatus;
@@ -58,7 +59,7 @@ public class MainActivity extends Activity {
   private Thread atmosphereThread;
   private volatile boolean atmosphereOn=false, stereoOn=false;
   private volatile int atmosphereType=0, atmosphereVolume=20, stereoVolume=25, stereoBeat=6, stereoCarrier=180;
-  private long strokePeriodMs(){return Math.max(100,Math.round(60000.0/Math.max(1,rhythmBpm)));}
+  private long strokePeriodMs(){return Math.max(100,Math.round(1000.0/(preciseStrokeBps>0?preciseStrokeBps:Math.max(1,rhythmBpm)/60.0)));}
   private void resetStrokeClock(){
     strokeAnchorMs=android.os.SystemClock.uptimeMillis();
     rescheduleStrokeClock();
@@ -85,7 +86,7 @@ public class MainActivity extends Activity {
       // Keep phase anchored to the stroke cycle rather than drifting with UI delays.
       long elapsed=Math.max(0,now-strokeNextBeat);
       strokeNextBeat+=(elapsed/period+1)*period;
-      if(rhythmStatus!=null)rhythmStatus.setText(String.format(java.util.Locale.US,"Stroke Sync • %.1f cycles/sec • one cue per cycle",rhythmBpm/60.0));
+      if(rhythmStatus!=null)rhythmStatus.setText(String.format(java.util.Locale.US,"Stroke Sync • %.2f cycles/sec • one cue per cycle",preciseStrokeBps>0?preciseStrokeBps:rhythmBpm/60.0));
       rhythmHandler.postDelayed(this,Math.max(1,strokeNextBeat-android.os.SystemClock.uptimeMillis()));
       return;
     }
@@ -158,7 +159,7 @@ public class MainActivity extends Activity {
         double beatsPerSecond=(p+5)/10.0;
         rhythmBpm=(int)Math.round(beatsPerSecond*60);
         tempo.setText(String.format(java.util.Locale.US,"Beats per second • %.1f",beatsPerSecond));
-        if(user&&rhythmEnabled){if(strokeSync)resetStrokeClock();else{rhythmHandler.removeCallbacks(rhythmTask);rhythmHandler.post(rhythmTask);}}
+        if(user){preciseStrokeBps=0.0;}if(user&&rhythmEnabled){if(strokeSync)resetStrokeClock();else{rhythmHandler.removeCallbacks(rhythmTask);rhythmHandler.post(rhythmTask);}}
       }
       public void onStartTrackingTouch(SeekBar b){}
       public void onStopTrackingTouch(SeekBar b){}
@@ -213,11 +214,14 @@ public class MainActivity extends Activity {
       }
       int position=Math.max(0,Math.min(95,(int)Math.round(measuredBps*10)-5));
       tempoSlider.setProgress(position);
+      // Retain full measured precision even though the manual slider shows tenths.
+      preciseStrokeBps=measuredBps;
+      tempo.setText(String.format(java.util.Locale.US,"Beats per second • %.2f (auto)",measuredBps));
       if(!strokeMode.isChecked())strokeMode.setChecked(true);
-      // Anchor timing to the most recent tap rather than the time the UI updates.
+      // Align the clock with the last observed cycle, retaining the user's offset.
       strokeAnchorMs=now;
       rescheduleStrokeClock();
-      tapResult.setText(String.format(java.util.Locale.US,"Measured %.2f BPS • set %.1f BPS • %d taps. Keep tapping to refine.",measuredBps,rhythmBpm/60.0,tapTimes.size()));
+      tapResult.setText(String.format(java.util.Locale.US,"AUTO • %.2f BPS • %d taps • timing aligned. Keep tapping to refine; stop to lock.",measuredBps,tapTimes.size()));
     });
     TextView soundLabel=text("Rhythm sound",16,true);rhythmCard.addView(soundLabel);
     Spinner soundPicker=new Spinner(this);
