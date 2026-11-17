@@ -647,22 +647,18 @@ public class MainActivity extends Activity {
   private void resetRhythmTone(){
     if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}
     if(rhythmVolume<=0)return;
-    // Short, punchy transient with bass body and audible upper harmonics.
-    // A peak-limited waveform avoids digital clipping at high volume.
-    int rate=44100, samples=rate*110/1000;
+    // Restore the original rounded, low-frequency thump.
+    // Gentle saturation increases audibility without clipping the PCM output.
+    int rate=44100, samples=rate*140/1000;
     byte[] pcm=new byte[samples*2];
-    double intensity=Math.max(0.1,Math.min(2.0,rhythmPunch/100.0));
     for(int i=0;i<samples;i++){
       double t=i/(double)rate;
-      double attack=Math.min(1.0,t/0.003);
-      double body=Math.exp(-t*32.0);
-      double snap=Math.exp(-t*95.0);
-      double fundamental=Math.sin(2*Math.PI*(78*t-95*t*t));
-      double harmonic=Math.sin(2*Math.PI*156*t);
-      double clickTransient=Math.sin(2*Math.PI*680*t);
-      double signal=attack*(fundamental*body*0.88+harmonic*body*0.38+clickTransient*snap*0.20)*intensity;
-      signal=Math.tanh(signal*1.9)/Math.tanh(1.9);
-      short v=(short)(Math.max(-1.0,Math.min(1.0,signal))*30000);
+      double env=Math.pow(1.0-Math.min(1.0,t/0.14),3);
+      double attack=Math.min(1.0,t/0.012);
+      double wave=Math.sin(2*Math.PI*(65*t+20*t*t));
+      double original=wave*env*attack;
+      double boosted=Math.tanh(original*2.2)/Math.tanh(2.2);
+      short v=(short)(boosted*30000);
       pcm[i*2]=(byte)(v&255);pcm[i*2+1]=(byte)((v>>8)&255);
     }
     try{
