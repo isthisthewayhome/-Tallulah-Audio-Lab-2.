@@ -210,13 +210,25 @@ public class MainActivity extends Activity {
     resetParams.topMargin=dp(8);
     tapCenter.addView(tapClear,resetParams);
     final java.util.ArrayList<Long> tapTimes=new java.util.ArrayList<>();
-    tapClear.setOnClickListener(v->{tapTimes.clear();tapResult.setText("Ready • tap once per full back-and-forth stroke");});
+    final int[] tapCount={0};
+    tapClear.setOnClickListener(v->{
+      tapTimes.clear();tapCount[0]=0;
+      tapResult.setText("Ready • tap once per full back-and-forth stroke");
+    });
     tapMatch.setOnClickListener(v->{
       long now=android.os.SystemClock.uptimeMillis();
-      if(!tapTimes.isEmpty()&&now-tapTimes.get(tapTimes.size()-1)>2500)tapTimes.clear();
+      tapCount[0]++;
+      // Long pauses are excluded from tempo measurement, not treated as a reset.
+      if(!tapTimes.isEmpty()&&now-tapTimes.get(tapTimes.size()-1)>2500){
+        tapTimes.clear();
+      }
       tapTimes.add(now);
-      if(tapTimes.size()>12)tapTimes.remove(0);
-      if(tapTimes.size()<3){tapResult.setText("Keep tapping • "+tapTimes.size()+" taps recorded");return;}
+      // Keep a rolling window of 24 taps, while retaining the full session count.
+      if(tapTimes.size()>24)tapTimes.remove(0);
+      if(tapTimes.size()<3){
+        tapResult.setText("Taps: "+tapCount[0]+" • keep tapping to calibrate");
+        return;
+      }
       java.util.ArrayList<Long> intervals=new java.util.ArrayList<>();
       for(int i=1;i<tapTimes.size();i++)intervals.add(tapTimes.get(i)-tapTimes.get(i-1));
       java.util.Collections.sort(intervals);
@@ -225,18 +237,17 @@ public class MainActivity extends Activity {
       if(median<=0)return;
       double measuredBps=1000.0/median;
       if(measuredBps<0.5||measuredBps>10.0){
-        tapResult.setText(String.format(java.util.Locale.US,"Measured %.2f BPS • outside slider range (0.5–10.0)",measuredBps));return;
+        tapResult.setText(String.format(java.util.Locale.US,"Taps: %d • %.2f BPS outside range (0.5–10)",tapCount[0],measuredBps));
+        return;
       }
       int position=Math.max(0,Math.min(95,(int)Math.round(measuredBps*10)-5));
       tempoSlider.setProgress(position);
-      // Retain full measured precision even though the manual slider shows tenths.
       preciseStrokeBps=measuredBps;
       tempo.setText(String.format(java.util.Locale.US,"Beats per second • %.2f (auto)",measuredBps));
       if(!strokeMode.isChecked())strokeMode.setChecked(true);
-      // Align the clock with the last observed cycle, retaining the user's offset.
       strokeAnchorMs=now;
       rescheduleStrokeClock();
-      tapResult.setText(String.format(java.util.Locale.US,"AUTO • %.2f BPS • %d taps • timing aligned. Keep tapping to refine; stop to lock.",measuredBps,tapTimes.size()));
+      tapResult.setText(String.format(java.util.Locale.US,"AUTO • %.2f BPS • %d total taps • keep tapping to refine",measuredBps,tapCount[0]));
     });
     TextView soundLabel=text("Rhythm sound",16,true);rhythmCard.addView(soundLabel);
     Spinner soundPicker=new Spinner(this);
