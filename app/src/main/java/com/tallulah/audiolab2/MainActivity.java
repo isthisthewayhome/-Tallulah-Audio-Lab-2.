@@ -258,6 +258,68 @@ public class MainActivity extends Activity {
     Spinner patterns=new Spinner(this);String[] names={"Steady pulse","Wave • rise and fall","Build • gradual acceleration"};ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);patterns.setAdapter(adapter);rhythmCard.addView(patterns);
     patterns.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){rhythmPattern=position;rhythmTick=0;}public void onNothingSelected(android.widget.AdapterView<?> parent){}});
 
+    TextView presetTitle=text("Saved rhythm presets",16,true);rhythmCard.addView(presetTitle);
+    EditText presetName=new EditText(this);presetName.setSingleLine(true);presetName.setHint("Preset name (e.g. Speed One)");presetName.setTextColor(Color.WHITE);presetName.setHintTextColor(0xffb8a9c8);rhythmCard.addView(presetName);
+    Spinner presetPicker=new Spinner(this);rhythmCard.addView(presetPicker);
+    final java.util.ArrayList<String> presetNames=new java.util.ArrayList<>();
+    final ArrayAdapter<String> presetAdapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,presetNames);
+    presetPicker.setAdapter(presetAdapter);
+    final android.content.SharedPreferences rhythmPrefs=getSharedPreferences("rhythm_presets",MODE_PRIVATE);
+    final Runnable refreshPresets=()->{
+      String previous=presetPicker.getSelectedItem()==null?"":presetPicker.getSelectedItem().toString();
+      presetNames.clear();presetNames.add("Select saved preset");
+      try{
+        org.json.JSONObject saved=new org.json.JSONObject(rhythmPrefs.getString("presets","{}"));
+        java.util.Iterator<String> keys=saved.keys();
+        while(keys.hasNext())presetNames.add(keys.next());
+        java.util.Collections.sort(presetNames.subList(1,presetNames.size()));
+      }catch(Exception ignored){}
+      presetAdapter.notifyDataSetChanged();
+      int selected=presetNames.indexOf(previous);presetPicker.setSelection(Math.max(0,selected));
+    };
+    refreshPresets.run();
+    Button savePreset=button("Save rhythm preset");rhythmCard.addView(savePreset);
+    Button loadPreset=button("Load selected preset");rhythmCard.addView(loadPreset);
+    TextView presetMessage=text("Presets stay on this phone until app data is cleared.",13,false);rhythmCard.addView(presetMessage);
+    savePreset.setOnClickListener(v->{
+      String name=presetName.getText().toString().trim();
+      if(name.length()==0){presetMessage.setText("Enter a name first.");return;}
+      if(name.length()>40){presetMessage.setText("Use a name under 40 characters.");return;}
+      try{
+        org.json.JSONObject saved=new org.json.JSONObject(rhythmPrefs.getString("presets","{}"));
+        org.json.JSONObject preset=new org.json.JSONObject();
+        preset.put("bps",preciseStrokeBps>0?preciseStrokeBps:rhythmBpm/60.0);
+        preset.put("sound",rhythmSound);preset.put("volume",rhythmVolume);
+        preset.put("punch",rhythmPunch);preset.put("pattern",rhythmPattern);
+        preset.put("offset",strokeOffsetPercent);preset.put("sync",strokeSync);
+        saved.put(name,preset);
+        rhythmPrefs.edit().putString("presets",saved.toString()).apply();
+        refreshPresets.run();presetPicker.setSelection(presetNames.indexOf(name));
+        presetMessage.setText("Saved: "+name);
+      }catch(Exception e){presetMessage.setText("Could not save preset.");}
+    });
+    loadPreset.setOnClickListener(v->{
+      String name=presetPicker.getSelectedItem()==null?"":presetPicker.getSelectedItem().toString();
+      if(name.equals("Select saved preset")){presetMessage.setText("Choose a saved preset.");return;}
+      try{
+        org.json.JSONObject saved=new org.json.JSONObject(rhythmPrefs.getString("presets","{}"));
+        org.json.JSONObject preset=saved.getJSONObject(name);
+        double bps=Math.max(0.5,Math.min(10.0,preset.optDouble("bps",0.7)));
+        tempoSlider.setProgress(Math.max(0,Math.min(95,(int)Math.round(bps*10)-5)));
+        preciseStrokeBps=bps;
+        tempo.setText(String.format(java.util.Locale.US,"Beats per second • %.2f (preset)",bps));
+        soundPicker.setSelection(Math.max(0,Math.min(4,preset.optInt("sound",0))));
+        loudSlider.setProgress(Math.max(0,Math.min(100,preset.optInt("volume",75))));
+        punchSlider.setProgress(Math.max(0,Math.min(200,preset.optInt("punch",100))));
+        patterns.setSelection(Math.max(0,Math.min(2,preset.optInt("pattern",0))));
+        offsetSlider.setProgress(Math.max(0,Math.min(99,preset.optInt("offset",0))));
+        strokeMode.setChecked(preset.optBoolean("sync",true));
+        if(strokeSync)resetStrokeClock();
+        else if(rhythmEnabled){rhythmHandler.removeCallbacks(rhythmTask);rhythmHandler.post(rhythmTask);}
+        presetMessage.setText("Loaded: "+name+" • Tap Sync Now to align with the machine.");
+      }catch(Exception e){presetMessage.setText("Could not load preset.");}
+    });
+
     LinearLayout binauralSection=collapsibleSection(root,"Binaural beat generator",false);
     LinearLayout binCard=new LinearLayout(this);binCard.setOrientation(1);binCard.setPadding(20,20,20,20);
     GradientDrawable binShape=new GradientDrawable();binShape.setColor(0xff1e1e32);binShape.setCornerRadius(24);binCard.setBackground(binShape);binauralSection.addView(binCard);
