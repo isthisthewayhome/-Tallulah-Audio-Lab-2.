@@ -249,11 +249,29 @@ public class MainActivity extends Activity {
       rescheduleStrokeClock();
       tapResult.setText(String.format(java.util.Locale.US,"AUTO • %.2f BPS • %d total taps • keep tapping to refine",measuredBps,tapCount[0]));
     });
-    TextView soundLabel=text("Rhythm sound",16,true);rhythmCard.addView(soundLabel);
+    TextView soundLabel=text("♫  RHYTHM SOUNDS",18,true);
+    soundLabel.setTextColor(0xffD9B6FF);
+    soundLabel.setPadding(dp(16),dp(14),dp(16),dp(12));
+    GradientDrawable soundHighlight=new GradientDrawable();
+    soundHighlight.setColor(0xff49315D);soundHighlight.setCornerRadius(dp(16));
+    soundHighlight.setStroke(dp(2),0xffB497FF);
+    LinearLayout soundPanel=new LinearLayout(this);soundPanel.setOrientation(1);
+    soundPanel.setPadding(dp(8),dp(4),dp(8),dp(12));soundPanel.setBackground(soundHighlight);
+    LinearLayout.LayoutParams soundPanelParams=new LinearLayout.LayoutParams(-1,-2);
+    soundPanelParams.setMargins(0,dp(12),0,dp(12));rhythmCard.addView(soundPanel,soundPanelParams);
+    soundPanel.addView(soundLabel);
     Spinner soundPicker=new Spinner(this);
     String[] soundNames={"Original Soft Thump","Deep Bass","Heartbeat","Sharp Tap","Electronic Pulse"};
-    soundPicker.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,soundNames));
-    rhythmCard.addView(soundPicker);
+    ArrayAdapter<String> soundAdapter=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,soundNames){
+      @Override public View getView(int position,View convertView,android.view.ViewGroup parent){
+        View view=super.getView(position,convertView,parent);
+        if(view instanceof TextView){((TextView)view).setTextColor(Color.WHITE);((TextView)view).setTextSize(17);view.setPadding(dp(12),dp(12),dp(12),dp(12));}
+        return view;
+      }
+    };
+    soundAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+    soundPicker.setAdapter(soundAdapter);
+    soundPanel.addView(soundPicker);
     soundPicker.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
       public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){
         if(rhythmSound!=position){rhythmSound=position;resetRhythmTone();}
@@ -269,9 +287,10 @@ public class MainActivity extends Activity {
     Spinner patterns=new Spinner(this);String[] names={"Steady pulse","Wave • rise and fall","Build • gradual acceleration"};ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);patterns.setAdapter(adapter);rhythmCard.addView(patterns);
     patterns.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){rhythmPattern=position;rhythmTick=0;}public void onNothingSelected(android.widget.AdapterView<?> parent){}});
 
-    TextView presetTitle=text("Saved rhythm presets",16,true);rhythmCard.addView(presetTitle);
-    EditText presetName=new EditText(this);presetName.setSingleLine(true);presetName.setHint("Preset name (e.g. Speed One)");presetName.setTextColor(Color.WHITE);presetName.setHintTextColor(0xffb8a9c8);rhythmCard.addView(presetName);
-    Spinner presetPicker=new Spinner(this);rhythmCard.addView(presetPicker);
+    LinearLayout presetContent=collapsibleSection(rhythmCard,"Saved rhythm presets",false);
+    TextView presetTitle=text("Saved rhythm presets",16,true);presetContent.addView(presetTitle);
+    EditText presetName=new EditText(this);presetName.setSingleLine(true);presetName.setHint("Preset name (e.g. Speed One)");presetName.setTextColor(Color.WHITE);presetName.setHintTextColor(0xffb8a9c8);presetContent.addView(presetName);
+    Spinner presetPicker=new Spinner(this);presetContent.addView(presetPicker);
     final java.util.ArrayList<String> presetNames=new java.util.ArrayList<>();
     final ArrayAdapter<String> presetAdapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,presetNames);
     presetPicker.setAdapter(presetAdapter);
@@ -289,12 +308,12 @@ public class MainActivity extends Activity {
       int selected=presetNames.indexOf(previous);presetPicker.setSelection(Math.max(0,selected));
     };
     refreshPresets.run();
-    Button savePreset=button("Save rhythm preset");rhythmCard.addView(savePreset);
-    Button loadPreset=button("Quick load selected preset");rhythmCard.addView(loadPreset);
-    Button updatePreset=button("Update selected preset");rhythmCard.addView(updatePreset);
-    Button renamePreset=button("Rename selected preset");rhythmCard.addView(renamePreset);
-    Button deletePreset=button("Delete selected preset");rhythmCard.addView(deletePreset);
-    TextView presetMessage=text("Presets stay on this phone until app data is cleared.",13,false);rhythmCard.addView(presetMessage);
+    Button savePreset=button("Save rhythm preset");presetContent.addView(savePreset);
+    Button loadPreset=button("Quick load selected preset");presetContent.addView(loadPreset);
+    Button updatePreset=button("Update selected preset");presetContent.addView(updatePreset);
+    Button renamePreset=button("Rename selected preset");presetContent.addView(renamePreset);
+    Button deletePreset=button("Delete selected preset");presetContent.addView(deletePreset);
+    TextView presetMessage=text("Presets stay on this phone until app data is cleared.",13,false);presetContent.addView(presetMessage);
     final java.util.function.Supplier<org.json.JSONObject> currentSettings=()->{
       org.json.JSONObject preset=new org.json.JSONObject();
       try{
