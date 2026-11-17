@@ -50,7 +50,7 @@ public class MainActivity extends Activity {
   private final Handler rhythmHandler = new Handler(Looper.getMainLooper());
   private AudioTrack rhythmTone;
   private boolean rhythmEnabled=false;
-  private int rhythmBpm=40, rhythmVolume=30, rhythmPunch=100, rhythmPattern=0, rhythmTick=0;
+  private int rhythmBpm=40, rhythmVolume=75, rhythmPunch=100, rhythmPattern=0, rhythmTick=0;
   private TextView rhythmStatus;
   private AudioTrack atmosphereTrack;
   private Thread atmosphereThread;
@@ -126,8 +126,8 @@ public class MainActivity extends Activity {
     });
     slower.setOnClickListener(v->tempoSlider.setProgress(Math.max(0,tempoSlider.getProgress()-1)));
     faster.setOnClickListener(v->tempoSlider.setProgress(Math.min(tempoSlider.getMax(),tempoSlider.getProgress()+1)));
-    TextView loud=text("Guide volume • 30%",14,false);rhythmCard.addView(loud);
-    SeekBar loudSlider=new SeekBar(this);loudSlider.setMax(100);loudSlider.setProgress(30);rhythmCard.addView(loudSlider);
+    TextView loud=text("Guide volume • 75%",14,false);rhythmCard.addView(loud);
+    SeekBar loudSlider=new SeekBar(this);loudSlider.setMax(100);loudSlider.setProgress(75);rhythmCard.addView(loudSlider);
     loudSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){rhythmVolume=p;loud.setText("Guide volume • "+p+"%");if(rhythmEnabled)resetRhythmTone();}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
     TextView punchLabel=text("Bass Punch • 100%",14,false);rhythmCard.addView(punchLabel);
     SeekBar punchSlider=new SeekBar(this);punchSlider.setMax(200);punchSlider.setProgress(100);rhythmCard.addView(punchSlider);
@@ -647,20 +647,28 @@ public class MainActivity extends Activity {
   private void resetRhythmTone(){
     if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}
     if(rhythmVolume<=0)return;
-    int rate=44100, samples=rate*140/1000;
+    // Short, punchy transient with bass body and audible upper harmonics.
+    // A peak-limited waveform avoids digital clipping at high volume.
+    int rate=44100, samples=rate*110/1000;
     byte[] pcm=new byte[samples*2];
+    double intensity=Math.max(0.1,Math.min(2.0,rhythmPunch/100.0));
     for(int i=0;i<samples;i++){
       double t=i/(double)rate;
-      double env=Math.pow(1.0-Math.min(1.0,t/0.14),3);
-      double attack=Math.min(1.0,t/0.012);
-      double wave=Math.sin(2*Math.PI*(65*t+20*t*t));
-      short v=(short)(wave*env*attack*20000);
+      double attack=Math.min(1.0,t/0.003);
+      double body=Math.exp(-t*32.0);
+      double snap=Math.exp(-t*95.0);
+      double fundamental=Math.sin(2*Math.PI*(78*t-95*t*t));
+      double harmonic=Math.sin(2*Math.PI*156*t);
+      double transient=Math.sin(2*Math.PI*680*t);
+      double signal=attack*(fundamental*body*0.88+harmonic*body*0.38+transient*snap*0.20)*intensity;
+      signal=Math.tanh(signal*1.9)/Math.tanh(1.9);
+      short v=(short)(Math.max(-1.0,Math.min(1.0,signal))*30000);
       pcm[i*2]=(byte)(v&255);pcm[i*2+1]=(byte)((v>>8)&255);
     }
     try{
       rhythmTone=new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()).setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()).setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(pcm.length).build();
       rhythmTone.write(pcm,0,pcm.length);
-      rhythmTone.setVolume(Math.min(1f,(rhythmVolume/100f)*(rhythmPunch/100f)));
+      rhythmTone.setVolume(Math.min(1f,rhythmVolume/100f));
     }catch(Exception e){rhythmTone=null;if(rhythmStatus!=null)rhythmStatus.setText("Pulse audio unavailable");}
   }
   private void playSoftPulse(){
