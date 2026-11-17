@@ -42,7 +42,7 @@ public class MainActivity extends Activity {
   private boolean draggingMaster=false;
   private boolean playing = false;
   private final Handler clipHandler=new Handler(Looper.getMainLooper());
-  private final Runnable clipMonitor=new Runnable(){public void run(){for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}updateVolumes();updateMasterTimeline();clipHandler.postDelayed(this,80);}};
+  private final Runnable clipMonitor=new Runnable(){public void run(){for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}updateVolumes();updateMasterTimeline();updateTrackProgress();clipHandler.postDelayed(this,80);}};
   private final Handler rhythmHandler = new Handler(Looper.getMainLooper());
   private AudioTrack rhythmTone;
   private boolean rhythmEnabled=false;
@@ -55,7 +55,7 @@ public class MainActivity extends Activity {
   private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,Math.min(400,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));if(rhythmPattern==2)bpm=Math.min(400,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText("Rhythm guide • "+bpm+" BPM • audible cue");rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
   private final int bg = Color.rgb(16,13,24), panel = Color.rgb(34,25,45), accent = Color.rgb(187,115,213);
   private static class Track {
-    MediaPlayer player; Uri uri; SeekBar volume; SeekBar speed; CheckBox loop; TextView label; LinearLayout card; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0,fadeInMs=0,fadeOutMs=0;
+    MediaPlayer player; Uri uri; SeekBar volume; SeekBar speed; SeekBar progress; TextView progressLabel; boolean draggingProgress=false; CheckBox loop; TextView label; LinearLayout card; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0,fadeInMs=0,fadeOutMs=0;
     Track(MediaPlayer p,Uri u){player=p;uri=u;}
   }
   @Override public void onCreate(Bundle b){
@@ -175,9 +175,13 @@ public class MainActivity extends Activity {
       Button solo=button("▶ Track");row.addView(solo);solo.setOnClickListener(v->{if(player.isPlaying()){player.pause();solo.setText("▶ Track");}else{player.start();solo.setText("Ⅱ Track");}});
       Button mute=button("Mute");row.addView(mute);mute.setOnClickListener(v->{t.muted=!t.muted;mute.setText(t.muted?"Unmute":"Mute");updateVolumes();});
       Button isolate=button("Solo");row.addView(isolate);isolate.setOnClickListener(v->{t.solo=!t.solo;isolate.setText(t.solo?"Unsolo":"Solo");updateVolumes();});
-      TextView seekTitle=text("Preview position",13,false);card.addView(seekTitle);
-      SeekBar seek=new SeekBar(this);seek.setMax(Math.max(1,player.getDuration()));seek.setProgress(0);card.addView(seek);
-      seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){if(user)player.seekTo(p);}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+      TextView seekTitle=text("Track progress • 0:00 / "+clock(t.trimEndMs-t.trimStartMs),13,false);card.addView(seekTitle);t.progressLabel=seekTitle;
+      SeekBar seek=new SeekBar(this);seek.setMax(Math.max(1,t.trimEndMs-t.trimStartMs));seek.setProgress(0);card.addView(seek);t.progress=seek;
+      seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+        public void onProgressChanged(SeekBar b,int p,boolean user){if(user){int length=Math.max(0,t.trimEndMs-t.trimStartMs);t.progressLabel.setText("Track progress • "+clock(Math.min(p,length))+" / "+clock(length));}}
+        public void onStartTrackingTouch(SeekBar b){t.draggingProgress=true;}
+        public void onStopTrackingTouch(SeekBar b){int length=Math.max(0,t.trimEndMs-t.trimStartMs);try{player.seekTo(t.trimStartMs+Math.min(b.getProgress(),length));}catch(Exception ignored){}t.draggingProgress=false;updateTrackProgress();}
+      });
       Button clipEdit=button("✂ Trim clip");card.addView(clipEdit);clipEdit.setOnClickListener(v->showTrimEditor(t));
       Button fades=button("◐ Fade in / Fade out");card.addView(fades);fades.setOnClickListener(v->showFadeEditor(t));
       TextView speedLabel=text("Speed 1.00×",13,false);card.addView(speedLabel);
@@ -220,6 +224,17 @@ public class MainActivity extends Activity {
     for(Track t:tracks){try{position=Math.max(position,Math.max(0,t.player.getCurrentPosition()-t.trimStartMs));}catch(Exception ignored){}}
     masterSeek.setMax(Math.max(1,duration));masterSeek.setProgress(Math.min(position,duration));
     masterTime.setText(clock(position)+" / "+clock(duration));
+  }
+  private void updateTrackProgress(){
+    for(Track t:tracks){
+      if(t.progress==null||t.progressLabel==null||t.draggingProgress)continue;
+      try{
+        int length=Math.max(0,t.trimEndMs-t.trimStartMs);
+        int position=Math.max(0,Math.min(length,t.player.getCurrentPosition()-t.trimStartMs));
+        t.progress.setMax(Math.max(1,length));t.progress.setProgress(position);
+        t.progressLabel.setText("Track progress • "+clock(position)+" / "+clock(length)+(t.player.isPlaying()?" • Playing":""));
+      }catch(Exception ignored){}
+    }
   }
   private static class PcmExport {
     File file;int rate,channels;long frames;
