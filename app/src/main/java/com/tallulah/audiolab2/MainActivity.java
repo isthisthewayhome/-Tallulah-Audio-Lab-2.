@@ -31,7 +31,7 @@ public class MainActivity extends Activity {
   private TextView status;
   private boolean playing = false;
   private final Handler clipHandler=new Handler(Looper.getMainLooper());
-  private final Runnable clipMonitor=new Runnable(){public void run(){for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}clipHandler.postDelayed(this,80);}};
+  private final Runnable clipMonitor=new Runnable(){public void run(){for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}updateVolumes();clipHandler.postDelayed(this,80);}};
   private final Handler rhythmHandler = new Handler(Looper.getMainLooper());
   private AudioTrack rhythmTone;
   private boolean rhythmEnabled=false;
@@ -44,7 +44,7 @@ public class MainActivity extends Activity {
   private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,Math.min(400,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));if(rhythmPattern==2)bpm=Math.min(400,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText("Rhythm guide • "+bpm+" BPM • audible cue");rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
   private final int bg = Color.rgb(16,13,24), panel = Color.rgb(34,25,45), accent = Color.rgb(187,115,213);
   private static class Track {
-    MediaPlayer player; Uri uri; SeekBar volume; CheckBox loop; TextView label; LinearLayout card; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0;
+    MediaPlayer player; Uri uri; SeekBar volume; CheckBox loop; TextView label; LinearLayout card; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0,fadeInMs=0,fadeOutMs=0;
     Track(MediaPlayer p,Uri u){player=p;uri=u;}
   }
   @Override public void onCreate(Bundle b){
@@ -156,12 +156,39 @@ public class MainActivity extends Activity {
       SeekBar seek=new SeekBar(this);seek.setMax(Math.max(1,player.getDuration()));seek.setProgress(0);card.addView(seek);
       seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){if(user)player.seekTo(p);}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
       Button clipEdit=button("✂ Trim clip");card.addView(clipEdit);clipEdit.setOnClickListener(v->showTrimEditor(t));
+      Button fades=button("◐ Fade in / Fade out");card.addView(fades);fades.setOnClickListener(v->showFadeEditor(t));
       TextView speedLabel=text("Speed 1.00×",13,false);card.addView(speedLabel);
       SeekBar speed=new SeekBar(this);speed.setMax(150);speed.setProgress(50);card.addView(speed);
       speed.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){float rate=0.5f+p/100f;speedLabel.setText(String.format(java.util.Locale.US,"Speed %.2f×",rate));try{player.setPlaybackParams(player.getPlaybackParams().setSpeed(rate));}catch(Exception ignored){}}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
       Button remove=button("✕");row.addView(remove);remove.setOnClickListener(v->{player.release();tracks.remove(t);trackList.removeView(card);status.setText("Track removed");});
       status.setText("Imported "+tracks.size()+" track(s)");
     }catch(Exception e){status.setText("Could not open audio: "+e.getMessage());}
+  }
+  private void showFadeEditor(Track t){
+    int duration=Math.max(1,t.trimEndMs-t.trimStartMs);
+    LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setPadding(28,16,28,12);
+    TextView info=text("Clip duration: "+clock(duration)+" • fades change playback volume, not your original file.",13,false);layout.addView(info);
+    TextView inLabel=text("",15,true);layout.addView(inLabel);
+    SeekBar fadeIn=new SeekBar(this);fadeIn.setMax(duration/1000);fadeIn.setProgress(t.fadeInMs/1000);layout.addView(fadeIn);
+    TextView outLabel=text("",15,true);layout.addView(outLabel);
+    SeekBar fadeOut=new SeekBar(this);fadeOut.setMax(duration/1000);fadeOut.setProgress(t.fadeOutMs/1000);layout.addView(fadeOut);
+    Runnable refresh=()->{
+      if(fadeIn.getProgress()+fadeOut.getProgress()>duration/1000){
+        int allowed=Math.max(0,duration/1000-fadeIn.getProgress());fadeOut.setProgress(allowed);
+      }
+      inLabel.setText("Fade in: "+fadeIn.getProgress()+" seconds");
+      outLabel.setText("Fade out: "+fadeOut.getProgress()+" seconds");
+    };
+    SeekBar.OnSeekBarChangeListener change=new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar b,int p,boolean fromUser){refresh.run();}
+      public void onStartTrackingTouch(SeekBar b){}
+      public void onStopTrackingTouch(SeekBar b){}
+    };
+    fadeIn.setOnSeekBarChangeListener(change);fadeOut.setOnSeekBarChangeListener(change);refresh.run();
+    new android.app.AlertDialog.Builder(this).setTitle("Playback fades").setView(layout).setNegativeButton("Cancel",null).setPositiveButton("Apply",(d,w)->{
+      t.fadeInMs=fadeIn.getProgress()*1000;t.fadeOutMs=fadeOut.getProgress()*1000;
+      updateVolumes();status.setText("Fades set: in "+(t.fadeInMs/1000)+"s • out "+(t.fadeOutMs/1000)+"s");
+    }).show();
   }
   private String clock(int ms){
     int seconds=Math.max(0,ms)/1000;
@@ -252,7 +279,17 @@ public class MainActivity extends Activity {
   private void writeLe(RandomAccessFile f,int value)throws Exception{for(int i=0;i<4;i++)f.write((value>>(i*8))&255);}
   private void writeShortLe(RandomAccessFile f,int value)throws Exception{f.write(value&255);f.write((value>>8)&255);}
   private boolean hasSolo(){for(Track t:tracks)if(t.solo)return true;return false;}
-  private void updateVolumes(){boolean any=hasSolo();for(Track t:tracks){float v=(t.muted||(any&&!t.solo))?0:t.volume.getProgress()/100f;try{t.player.setVolume(v,v);}catch(Exception ignored){}}}
+  private void updateVolumes(){boolean any=hasSolo();for(Track t:tracks){
+    float v=(t.muted||(any&&!t.solo))?0:t.volume.getProgress()/100f;
+    try{
+      if(t.player.isPlaying()){
+        int pos=t.player.getCurrentPosition(),end=t.trimEndMs;
+        if(t.fadeInMs>0)v*=Math.max(0f,Math.min(1f,(pos-t.trimStartMs)/(float)t.fadeInMs));
+        if(t.fadeOutMs>0)v*=Math.max(0f,Math.min(1f,(end-pos)/(float)t.fadeOutMs));
+      }
+      t.player.setVolume(v,v);
+    }catch(Exception ignored){}
+  }}
   private void seekAll(int delta){for(Track t:tracks){int target=Math.max(0,Math.min(t.player.getDuration(),t.player.getCurrentPosition()+delta));t.player.seekTo(target);}}
 
   private synchronized void startAtmosphereIfNeeded(){
