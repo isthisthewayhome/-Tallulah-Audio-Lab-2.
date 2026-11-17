@@ -33,7 +33,7 @@ class MainActivity : Activity() {
         addButton("Open") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type="image/*"; addCategory(Intent.CATEGORY_OPENABLE) },1) }
         addButton("Compare") { comparing = !comparing; image.setImageBitmap(if(comparing) source else result); message.text = if(comparing) "Showing original" else "Showing edited" }
         addButton("Save") { saveImage() }
-        addButton("AI 2×") { aiUpscale() }
+        addButton("AI 4×") { aiUpscale() }
         root.addView(bar)
         image = ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; setBackgroundColor(Color.DKGRAY) }
         root.addView(image,LinearLayout.LayoutParams(-1,0,1f))
@@ -133,7 +133,7 @@ class MainActivity : Activity() {
 
     private fun aiUpscale() {
         val bmp = result ?: run { message.text = "Open a photo first"; return }
-        val asset = try { assets.open("upscale_x2.tflite") } catch (_: Exception) {
+        val asset = try { assets.open("upscale_x4.tflite") } catch (_: Exception) {
             message.text = "AI model not bundled yet. No fake upscale applied."
             return
         }
@@ -149,8 +149,8 @@ class MainActivity : Activity() {
                     require(inputShape.size == 4 && outputShape.size == 4 &&
                         inputShape[0] == 1 && outputShape[0] == 1 &&
                         inputShape[3] == 3 && outputShape[3] == 3 &&
-                        outputShape[1] == inputShape[1] * 2 &&
-                        outputShape[2] == inputShape[2] * 2) { "Model must be NHWC RGB 2×" }
+                        outputShape[1] == inputShape[1] * 4 &&
+                        outputShape[2] == inputShape[2] * 4) { "Model must be NHWC RGB 4×" }
                     require(interpreter.getInputTensor(0).dataType().toString() == "FLOAT32" &&
                         interpreter.getOutputTensor(0).dataType().toString() == "FLOAT32") {
                         "Model must use float32 tensors"
@@ -183,7 +183,7 @@ class MainActivity : Activity() {
                         result = enhanced
                         comparing = false
                         image.setImageBitmap(enhanced)
-                        message.text = "AI 2× output: ${ow} × ${oh}"
+                        message.text = "AI 4× output: ${ow} × ${oh}"
                     }
                 }
             } catch (e: Exception) {
