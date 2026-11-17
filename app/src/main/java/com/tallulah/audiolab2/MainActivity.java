@@ -226,8 +226,10 @@ public class MainActivity extends Activity {
     new Thread(()->{
       Uri dest=null;
       try{
-        ContentValues values=new ContentValues();values.put(MediaStore.Audio.Media.DISPLAY_NAME,"Tallulah_Edit_"+System.currentTimeMillis()+".wav");
-        values.put(MediaStore.Audio.Media.MIME_TYPE,"audio/wav");
+        String mime=getContentResolver().getType(source);if(mime==null)mime="audio/wav";
+        String ext=mime.contains("mpeg")?"mp3":mime.contains("mp4")?"m4a":mime.contains("ogg")?"ogg":"wav";
+        ContentValues values=new ContentValues();values.put(MediaStore.Audio.Media.DISPLAY_NAME,"Tallulah_Edit_"+System.currentTimeMillis()+"."+ext);
+        values.put(MediaStore.Audio.Media.MIME_TYPE,mime);
         values.put(MediaStore.Audio.Media.RELATIVE_PATH,"Music/Tallulah Audio Lab");
         values.put(MediaStore.Audio.Media.IS_PENDING,1);
         dest=getContentResolver().insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,values);
