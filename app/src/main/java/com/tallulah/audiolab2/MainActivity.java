@@ -23,15 +23,22 @@ import android.media.MediaFormat;
 import java.nio.ByteBuffer;
 import java.io.File;
 import java.io.RandomAccessFile;
+import java.io.InputStream;
+import java.io.OutputStream;
+import android.content.ContentValues;
+import android.provider.MediaStore;
 
 public class MainActivity extends Activity {
   private static final int PICK_AUDIO = 51;
   private final ArrayList<Track> tracks = new ArrayList<>();
   private LinearLayout trackList;
   private TextView status;
+  private SeekBar masterSeek;
+  private TextView masterTime;
+  private boolean draggingMaster=false;
   private boolean playing = false;
   private final Handler clipHandler=new Handler(Looper.getMainLooper());
-  private final Runnable clipMonitor=new Runnable(){public void run(){for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}updateVolumes();clipHandler.postDelayed(this,80);}};
+  private final Runnable clipMonitor=new Runnable(){public void run(){for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}updateVolumes();updateMasterTimeline();clipHandler.postDelayed(this,80);}};
   private final Handler rhythmHandler = new Handler(Looper.getMainLooper());
   private AudioTrack rhythmTone;
   private boolean rhythmEnabled=false;
@@ -67,6 +74,16 @@ public class MainActivity extends Activity {
     play.setOnClickListener(v->{if(tracks.isEmpty()){status.setText("Add an audio file first.");return;}int count=0;for(Track t:tracks){try{if(!hasSolo()||t.solo){if(t.player.getCurrentPosition()>=t.trimEndMs)t.player.seekTo(t.trimStartMs);t.player.start();count++;}}catch(Exception e){status.setText("Playback error: "+e.getMessage());}}if(count>0){playing=true;status.setText("Playing "+count+" track(s)");}});
     pause.setOnClickListener(v->{for(Track t:tracks)if(t.player.isPlaying())t.player.pause();playing=false;status.setText("Paused");});
     reset.setOnClickListener(v->{for(Track t:tracks){t.player.pause();t.player.seekTo(t.trimStartMs);}playing=false;status.setText("Reset to start");});
+    TextView timelineTitle=text("Mix position",14,true);timelineTitle.setPadding(0,14,0,4);root.addView(timelineTitle);
+    masterTime=text("0:00 / 0:00",14,false);root.addView(masterTime);
+    masterSeek=new SeekBar(this);masterSeek.setMax(1);root.addView(masterSeek);
+    masterSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar bar,int value,boolean user){if(user){masterTime.setText(clock(value)+" / "+clock(getMixDuration()));}}
+      public void onStartTrackingTouch(SeekBar bar){draggingMaster=true;}
+      public void onStopTrackingTouch(SeekBar bar){int target=bar.getProgress();for(Track t:tracks){try{t.player.seekTo(Math.min(t.trimEndMs,t.trimStartMs+target));}catch(Exception ignored){}}draggingMaster=false;updateMasterTimeline();}
+    });
+    Button saveMix=button("💾 Save edited audio");root.addView(saveMix);
+    saveMix.setOnClickListener(v->saveEditedAudio());
     status=text("Ready to import audio",14,false);status.setTextColor(0xffcbb5d5);status.setPadding(0,16,0,14);root.addView(status);
     TextView title=text("Audio layers",23,true);title.setPadding(0,24,0,8);root.addView(title);
     root.addView(add);
@@ -189,6 +206,40 @@ public class MainActivity extends Activity {
       t.fadeInMs=fadeIn.getProgress()*1000;t.fadeOutMs=fadeOut.getProgress()*1000;
       updateVolumes();status.setText("Fades set: in "+(t.fadeInMs/1000)+"s • out "+(t.fadeOutMs/1000)+"s");
     }).show();
+  }
+  private int getMixDuration(){int max=0;for(Track t:tracks)max=Math.max(max,t.trimEndMs-t.trimStartMs);return max;}
+  private void updateMasterTimeline(){
+    if(masterSeek==null||masterTime==null||draggingMaster)return;
+    int duration=getMixDuration(),position=0;
+    for(Track t:tracks){try{position=Math.max(position,Math.max(0,t.player.getCurrentPosition()-t.trimStartMs));}catch(Exception ignored){}}
+    masterSeek.setMax(Math.max(1,duration));masterSeek.setProgress(Math.min(position,duration));
+    masterTime.setText(clock(position)+" / "+clock(duration));
+  }
+  private void saveEditedAudio(){
+    if(tracks.size()!=1){status.setText("Saving a combined multi-track mix is not available yet. Use one edited track.");return;}
+    Track t=tracks.get(0);
+    if(t.trimStartMs>0||t.trimEndMs<t.player.getDuration()-150||t.fadeInMs>0||t.fadeOutMs>0){
+      status.setText("This track has playback-only edits. Export with fades and trims needs the mix renderer; nothing saved.");return;
+    }
+    Uri source=t.uri;
+    status.setText("Saving audio to Music/Tallulah Audio Lab…");
+    new Thread(()->{
+      Uri dest=null;
+      try{
+        ContentValues values=new ContentValues();values.put(MediaStore.Audio.Media.DISPLAY_NAME,"Tallulah_Edit_"+System.currentTimeMillis()+".wav");
+        values.put(MediaStore.Audio.Media.MIME_TYPE,"audio/wav");
+        values.put(MediaStore.Audio.Media.RELATIVE_PATH,"Music/Tallulah Audio Lab");
+        values.put(MediaStore.Audio.Media.IS_PENDING,1);
+        dest=getContentResolver().insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,values);
+        if(dest==null)throw new Exception("Could not create file");
+        try(InputStream in=getContentResolver().openInputStream(source);OutputStream out=getContentResolver().openOutputStream(dest)){
+          if(in==null||out==null)throw new Exception("Could not open audio stream");
+          byte[] buffer=new byte[32768];int n;while((n=in.read(buffer))!=-1)out.write(buffer,0,n);
+        }
+        values.clear();values.put(MediaStore.Audio.Media.IS_PENDING,0);getContentResolver().update(dest,values,null,null);
+        runOnUiThread(()->status.setText("Saved to Music/Tallulah Audio Lab"));
+      }catch(Exception e){if(dest!=null)getContentResolver().delete(dest,null,null);String error=e.getMessage();runOnUiThread(()->status.setText("Save failed: "+error));}
+    }).start();
   }
   private String clock(int ms){
     int seconds=Math.max(0,ms)/1000;
