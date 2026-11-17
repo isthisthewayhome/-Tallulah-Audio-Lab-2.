@@ -469,7 +469,7 @@ public class MainActivity extends Activity {
           if(wifi!=null){lock=wifi.createMulticastLock("tallulah-govee-discovery");lock.setReferenceCounted(false);lock.acquire();}
           socket=new java.net.DatagramSocket(null);socket.setReuseAddress(true);
           socket.bind(new java.net.InetSocketAddress(4002));socket.setSoTimeout(500);
-          byte[] request="{\\"msg\\":{\\"cmd\\":\\"scan\\",\\"data\\":{\\"account_topic\\":\\"reserve\\"}}}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+          byte[] request="{\"msg\":{\"cmd\":\"scan\",\"data\":{\"account_topic\":\"reserve\"}}}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
           java.net.DatagramSocket sender=new java.net.DatagramSocket();
           try{
             sender.send(new java.net.DatagramPacket(request,request.length,java.net.InetAddress.getByName("239.255.255.250"),4001));
@@ -522,7 +522,7 @@ public class MainActivity extends Activity {
     new Thread(()->{
       int sent=0;
       try(java.net.DatagramSocket socket=new java.net.DatagramSocket()){
-        byte[] payload=("{\\"msg\\":{\\"cmd\\":\\"turn\\",\\"data\\":{\\"value\\":"+ (on?1:0) +"}}}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] payload=("{\"msg\":{\"cmd\":\"turn\",\"data\":{\"value\":"+ (on?1:0) +"}}}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
         for(String ip:targets){
           try{socket.send(new java.net.DatagramPacket(payload,payload.length,java.net.InetAddress.getByName(ip),4003));sent++;}
           catch(Exception ignored){}
