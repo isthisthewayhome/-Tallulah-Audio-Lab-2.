@@ -50,7 +50,7 @@ public class MainActivity extends Activity {
   private final Handler rhythmHandler = new Handler(Looper.getMainLooper());
   private AudioTrack rhythmTone;
   private boolean rhythmEnabled=false;
-  private int rhythmBpm=40, rhythmVolume=75, rhythmPunch=100, rhythmPattern=0, rhythmTick=0;
+  private int rhythmBpm=40, rhythmVolume=75, rhythmPunch=100, rhythmPattern=0, rhythmTick=0, rhythmSound=0;
   private TextView rhythmStatus;
   private AudioTrack atmosphereTrack;
   private Thread atmosphereThread;
@@ -126,6 +126,17 @@ public class MainActivity extends Activity {
     });
     slower.setOnClickListener(v->tempoSlider.setProgress(Math.max(0,tempoSlider.getProgress()-1)));
     faster.setOnClickListener(v->tempoSlider.setProgress(Math.min(tempoSlider.getMax(),tempoSlider.getProgress()+1)));
+    TextView soundLabel=text("Rhythm sound",16,true);rhythmCard.addView(soundLabel);
+    Spinner soundPicker=new Spinner(this);
+    String[] soundNames={"Original Soft Thump","Deep Bass","Heartbeat","Sharp Tap","Electronic Pulse"};
+    soundPicker.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,soundNames));
+    rhythmCard.addView(soundPicker);
+    soundPicker.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+      public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){
+        if(rhythmSound!=position){rhythmSound=position;resetRhythmTone();}
+      }
+      public void onNothingSelected(android.widget.AdapterView<?> parent){}
+    });
     TextView loud=text("Guide volume • 75%",14,false);rhythmCard.addView(loud);
     SeekBar loudSlider=new SeekBar(this);loudSlider.setMax(100);loudSlider.setProgress(75);rhythmCard.addView(loudSlider);
     loudSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){rhythmVolume=p;loud.setText("Guide volume • "+p+"%");if(rhythmEnabled)resetRhythmTone();}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
@@ -647,19 +658,43 @@ public class MainActivity extends Activity {
   private void resetRhythmTone(){
     if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}
     if(rhythmVolume<=0)return;
-    // Restore the original rounded, low-frequency thump.
-    // Gentle saturation increases audibility without clipping the PCM output.
-    int rate=44100, samples=rate*140/1000;
+    int rate=44100, samples=rate*180/1000;
     byte[] pcm=new byte[samples*2];
+    double strength=Math.max(0.1,Math.min(2.0,rhythmPunch/100.0));
     for(int i=0;i<samples;i++){
       double t=i/(double)rate;
-      double env=Math.pow(1.0-Math.min(1.0,t/0.14),3);
-      double attack=Math.min(1.0,t/0.012);
-      double wave=Math.sin(2*Math.PI*(65*t+20*t*t));
-      double original=wave*env*attack;
-      double boosted=Math.tanh(original*2.2)/Math.tanh(2.2);
-      short v=(short)(boosted*30000);
-      pcm[i*2]=(byte)(v&255);pcm[i*2+1]=(byte)((v>>8)&255);
+      double wave=0.0;
+      switch(rhythmSound){
+        case 1: { // Deep bass: descending low-frequency body.
+          double envelope=Math.exp(-t*23.0)*Math.min(1.0,t/0.008);
+          wave=Math.sin(2*Math.PI*(82*t-110*t*t))*envelope;
+          break;
+        }
+        case 2: { // Heartbeat: two rounded impulses in each beat.
+          double first=Math.exp(-Math.pow((t-0.025)/0.017,2));
+          double second=0.72*Math.exp(-Math.pow((t-0.112)/0.019,2));
+          wave=(first+second)*Math.sin(2*Math.PI*85*t);
+          break;
+        }
+        case 3: { // Sharp tap: short, bright transient.
+          double envelope=Math.exp(-t*85.0)*Math.min(1.0,t/0.002);
+          wave=(0.65*Math.sin(2*Math.PI*460*t)+0.35*Math.sin(2*Math.PI*900*t))*envelope;
+          break;
+        }
+        case 4: { // Electronic pulse: short synthetic square-like tone.
+          double envelope=Math.exp(-t*37.0)*Math.min(1.0,t/0.003);
+          wave=Math.tanh(3.0*Math.sin(2*Math.PI*(170*t+200*t*t)))*envelope;
+          break;
+        }
+        default: { // Original rounded thump.
+          double envelope=Math.pow(1.0-Math.min(1.0,t/0.14),3);
+          double attack=Math.min(1.0,t/0.012);
+          wave=Math.sin(2*Math.PI*(65*t+20*t*t))*envelope*attack;
+        }
+      }
+      double limited=Math.tanh(wave*strength*1.8)/Math.tanh(1.8);
+      short sample=(short)(Math.max(-1.0,Math.min(1.0,limited))*29000);
+      pcm[i*2]=(byte)(sample&255);pcm[i*2+1]=(byte)((sample>>8)&255);
     }
     try{
       rhythmTone=new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()).setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()).setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(pcm.length).build();
