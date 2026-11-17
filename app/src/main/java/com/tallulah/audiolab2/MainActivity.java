@@ -448,7 +448,89 @@ public class MainActivity extends Activity {
     Button dreamButton=button("▶ Start Dream Sounds");dreamCard.addView(dreamButton);
     dreamButton.setOnClickListener(v->{atmosphereOn=!atmosphereOn;startAtmosphereIfNeeded();dreamButton.setText(atmosphereOn?"■ Stop Dream Sounds":"▶ Start Dream Sounds");});
     dreamCard.addView(text("Synthesized sound textures. Use stereo headphones for binaural tones.",12,false));
-    TextView foot=text("Clip editing, export, and Govee lighting are still being rebuilt.",13,false);foot.setTextColor(0xffb7a5be);foot.setPadding(0,28,0,0);root.addView(foot);
+    LinearLayout lights=collapsibleSection(root,"Govee Lighting",false);
+    lights.addView(text("H801D • LAN discovery test. Keep phone on the same Wi-Fi as the lights.",13,false));
+    TextView lightStatus=text("Not scanned yet",14,false);lights.addView(lightStatus);
+    Spinner lightPicker=new Spinner(this);lights.addView(lightPicker);
+    ArrayList<String> lightNames=new ArrayList<>();lightNames.add("All discovered lights");
+    ArrayAdapter<String> lightAdapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,lightNames);
+    lightPicker.setAdapter(lightAdapter);
+    ArrayList<String> lightIps=new ArrayList<>();
+    Button scanLights=button("Find Govee lights");lights.addView(scanLights);
+    scanLights.setOnClickListener(v->{
+      lightStatus.setText("Scanning LAN for Govee lights…");
+      scanLights.setEnabled(false);
+      new Thread(()->{
+        java.util.LinkedHashMap<String,String> found=new java.util.LinkedHashMap<>();
+        android.net.wifi.WifiManager.MulticastLock lock=null;
+        java.net.DatagramSocket socket=null;
+        try{
+          android.net.wifi.WifiManager wifi=(android.net.wifi.WifiManager)getApplicationContext().getSystemService(WIFI_SERVICE);
+          if(wifi!=null){lock=wifi.createMulticastLock("tallulah-govee-discovery");lock.setReferenceCounted(false);lock.acquire();}
+          socket=new java.net.DatagramSocket(null);socket.setReuseAddress(true);
+          socket.bind(new java.net.InetSocketAddress(4002));socket.setSoTimeout(500);
+          byte[] request="{\\"msg\\":{\\"cmd\\":\\"scan\\",\\"data\\":{\\"account_topic\\":\\"reserve\\"}}}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+          java.net.DatagramSocket sender=new java.net.DatagramSocket();
+          try{
+            sender.send(new java.net.DatagramPacket(request,request.length,java.net.InetAddress.getByName("239.255.255.250"),4001));
+          }finally{sender.close();}
+          long end=android.os.SystemClock.elapsedRealtime()+4500;
+          while(android.os.SystemClock.elapsedRealtime()<end){
+            try{
+              byte[] buffer=new byte[2048];java.net.DatagramPacket packet=new java.net.DatagramPacket(buffer,buffer.length);
+              socket.receive(packet);
+              JSONObject message=new JSONObject(new String(packet.getData(),0,packet.getLength(),java.nio.charset.StandardCharsets.UTF_8));
+              JSONObject data=message.optJSONObject("msg");
+              if(data==null||!"scan".equals(data.optString("cmd")))continue;
+              JSONObject details=data.optJSONObject("data");if(details==null)continue;
+              String ip=details.optString("ip",packet.getAddress().getHostAddress());
+              String model=details.optString("sku",details.optString("model","Govee"));
+              if(!ip.isEmpty()&&!found.containsKey(ip))found.put(ip,model+" • "+ip);
+            }catch(java.net.SocketTimeoutException ignored){}
+          }
+        }catch(Exception ex){
+          String error=ex.getClass().getSimpleName()+": "+ex.getMessage();
+          runOnUiThread(()->lightStatus.setText("LAN scan failed: "+error));
+        }finally{
+          if(socket!=null)socket.close();
+          if(lock!=null&&lock.isHeld())lock.release();
+        }
+        runOnUiThread(()->{
+          lightIps.clear();lightNames.clear();lightNames.add("All discovered lights");
+          for(java.util.Map.Entry<String,String> entry:found.entrySet()){lightIps.add(entry.getKey());lightNames.add(entry.getValue());}
+          lightAdapter.notifyDataSetChanged();lightPicker.setSelection(0);
+          lightStatus.setText(found.size()+" light(s) found • expected 4");
+          scanLights.setEnabled(true);
+        });
+      }).start();
+    });
+    LinearLayout lightButtons=new LinearLayout(this);lightButtons.setOrientation(LinearLayout.HORIZONTAL);lights.addView(lightButtons);
+    Button lightsOn=button("Lights ON");Button lightsOff=button("Lights OFF");
+    lightButtons.addView(lightsOn,new LinearLayout.LayoutParams(0,dp(58),1));
+    lightButtons.addView(lightsOff,new LinearLayout.LayoutParams(0,dp(58),1));
+    lightsOn.setOnClickListener(v->sendGoveePower(lightIps,lightPicker.getSelectedItemPosition(),true,lightStatus));
+    lightsOff.setOnClickListener(v->sendGoveePower(lightIps,lightPicker.getSelectedItemPosition(),false,lightStatus));
+    lights.addView(text("First test: discover four devices, then turn one light on/off. Audio sync and colors come later.",12,false));
+    TextView foot=text("Govee LAN controls are in testing. Keep using Govee Home if discovery fails.",13,false);foot.setTextColor(0xffb7a5be);foot.setPadding(0,28,0,0);root.addView(foot);
+  }
+  private void sendGoveePower(ArrayList<String> ips,int selected,boolean on,TextView label){
+    ArrayList<String> targets=new ArrayList<>();
+    if(selected==0)targets.addAll(ips);
+    else if(selected>0&&selected<=ips.size())targets.add(ips.get(selected-1));
+    if(targets.isEmpty()){label.setText("Scan for lights first.");return;}
+    label.setText("Sending "+(on?"ON":"OFF")+" to "+targets.size()+" light(s)…");
+    new Thread(()->{
+      int sent=0;
+      try(java.net.DatagramSocket socket=new java.net.DatagramSocket()){
+        byte[] payload=("{\\"msg\\":{\\"cmd\\":\\"turn\\",\\"data\\":{\\"value\\":"+ (on?1:0) +"}}}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        for(String ip:targets){
+          try{socket.send(new java.net.DatagramPacket(payload,payload.length,java.net.InetAddress.getByName(ip),4003));sent++;}
+          catch(Exception ignored){}
+        }
+      }catch(Exception ignored){}
+      final int count=sent;
+      runOnUiThread(()->label.setText("Command sent to "+count+"/"+targets.size()+" light(s). Check whether lights responded."));
+    }).start();
   }
   private LinearLayout collapsibleSection(LinearLayout parent,String title,boolean initiallyOpen){
     LinearLayout section=new LinearLayout(this);section.setOrientation(1);
