@@ -659,8 +659,8 @@ public class MainActivity extends Activity {
       double snap=Math.exp(-t*95.0);
       double fundamental=Math.sin(2*Math.PI*(78*t-95*t*t));
       double harmonic=Math.sin(2*Math.PI*156*t);
-      double transient=Math.sin(2*Math.PI*680*t);
-      double signal=attack*(fundamental*body*0.88+harmonic*body*0.38+transient*snap*0.20)*intensity;
+      double clickTransient=Math.sin(2*Math.PI*680*t);
+      double signal=attack*(fundamental*body*0.88+harmonic*body*0.38+clickTransient*snap*0.20)*intensity;
       signal=Math.tanh(signal*1.9)/Math.tanh(1.9);
       short v=(short)(Math.max(-1.0,Math.min(1.0,signal))*30000);
       pcm[i*2]=(byte)(v&255);pcm[i*2+1]=(byte)((v>>8)&255);
