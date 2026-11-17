@@ -56,7 +56,7 @@ public class MainActivity extends Activity {
   private Thread atmosphereThread;
   private volatile boolean atmosphereOn=false, stereoOn=false;
   private volatile int atmosphereType=0, atmosphereVolume=20, stereoVolume=25, stereoBeat=6, stereoCarrier=180;
-  private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,Math.min(400,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));if(rhythmPattern==2)bpm=Math.min(400,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText("Rhythm guide • "+bpm+" BPM • audible cue");rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
+  private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,Math.min(600,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));if(rhythmPattern==2)bpm=Math.min(600,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText(String.format(java.util.Locale.US,"Rhythm guide • %.1f beats/sec • audible cue",bpm/60.0));rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
   private final int bg = Color.rgb(16,13,24), panel = Color.rgb(34,25,45), accent = Color.rgb(187,115,213);
   private static class Track {
     MediaPlayer player; Uri uri; SeekBar volume; SeekBar speed; SeekBar progress; TextView progressLabel; boolean draggingProgress=false; CheckBox loop; TextView label; LinearLayout card; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0,fadeInMs=0,fadeOutMs=0,startAtMs=0; boolean scheduledActive=false; TextView startLabel;
@@ -107,9 +107,25 @@ public class MainActivity extends Activity {
     rhythmStatus=text("Rhythm guide stopped",14,false);rhythmStatus.setPadding(0,14,0,8);rhythmCard.addView(rhythmStatus);
     Button rhythmToggle=button("▶ Start rhythm guide");rhythmCard.addView(rhythmToggle);
     rhythmToggle.setOnClickListener(v->{rhythmEnabled=!rhythmEnabled;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmEnabled){rhythmTick=0;resetRhythmTone();rhythmHandler.post(rhythmTask);rhythmToggle.setText("■ Stop rhythm guide");}else{rhythmToggle.setText("▶ Start rhythm guide");rhythmStatus.setText("Rhythm guide stopped");}});
-    TextView tempo=text("Live BPM • 40",16,true);rhythmCard.addView(tempo);
-    SeekBar tempoSlider=new SeekBar(this);tempoSlider.setMax(385);tempoSlider.setProgress(25);rhythmCard.addView(tempoSlider);
-    tempoSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){rhythmBpm=p+15;tempo.setText("Live BPM • "+rhythmBpm);if(rhythmEnabled){rhythmHandler.removeCallbacks(rhythmTask);rhythmHandler.post(rhythmTask);}}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
+    TextView tempo=text("Beats per second • 0.7",18,true);rhythmCard.addView(tempo);
+    TextView tempoHint=text("0.5–10.0 beats/sec • drag the large slider or tap − / +",13,false);rhythmCard.addView(tempoHint);
+    LinearLayout tempoRow=new LinearLayout(this);tempoRow.setOrientation(LinearLayout.HORIZONTAL);tempoRow.setGravity(android.view.Gravity.CENTER_VERTICAL);rhythmCard.addView(tempoRow);
+    Button slower=button("−");tempoRow.addView(slower,new LinearLayout.LayoutParams(dp(64),dp(64)));
+    SeekBar tempoSlider=new SeekBar(this);tempoSlider.setMax(95);tempoSlider.setProgress(2);tempoSlider.setMinHeight(dp(64));tempoSlider.setPadding(dp(14),dp(12),dp(14),dp(12));
+    tempoRow.addView(tempoSlider,new LinearLayout.LayoutParams(0,dp(72),1));
+    Button faster=button("+");tempoRow.addView(faster,new LinearLayout.LayoutParams(dp(64),dp(64)));
+    tempoSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar b,int p,boolean user){
+        double beatsPerSecond=(p+5)/10.0;
+        rhythmBpm=(int)Math.round(beatsPerSecond*60);
+        tempo.setText(String.format(java.util.Locale.US,"Beats per second • %.1f",beatsPerSecond));
+        if(user&&rhythmEnabled){rhythmHandler.removeCallbacks(rhythmTask);rhythmHandler.post(rhythmTask);}
+      }
+      public void onStartTrackingTouch(SeekBar b){}
+      public void onStopTrackingTouch(SeekBar b){}
+    });
+    slower.setOnClickListener(v->tempoSlider.setProgress(Math.max(0,tempoSlider.getProgress()-1)));
+    faster.setOnClickListener(v->tempoSlider.setProgress(Math.min(tempoSlider.getMax(),tempoSlider.getProgress()+1)));
     TextView loud=text("Guide volume • 30%",14,false);rhythmCard.addView(loud);
     SeekBar loudSlider=new SeekBar(this);loudSlider.setMax(100);loudSlider.setProgress(30);rhythmCard.addView(loudSlider);
     loudSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){rhythmVolume=p;loud.setText("Guide volume • "+p+"%");if(rhythmEnabled)resetRhythmTone();}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
@@ -161,6 +177,7 @@ public class MainActivity extends Activity {
     header.setOnClickListener(v->{boolean open=content.getVisibility()!=View.VISIBLE;content.setVisibility(open?View.VISIBLE:View.GONE);header.setText((open?"▾  ":"▸  ")+title);});
     return content;
   }
+  private int dp(int value){return (int)(value*getResources().getDisplayMetrics().density+0.5f);}
   private TextView text(String s,int size,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.WHITE);if(bold)t.setTypeface(null,Typeface.BOLD);return t;}
   private Button button(String s){Button b=new Button(this);b.setText(s);b.setTextColor(Color.WHITE);b.setAllCaps(false);b.setTextSize(13);b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff5b346c));return b;}
   @Override protected void onActivityResult(int request,int result,Intent data){
