@@ -41,8 +41,12 @@ public class MainActivity extends Activity {
   private TextView masterTime;
   private boolean draggingMaster=false;
   private boolean playing = false;
+  private long mixClockStartedAt=0;
+  private int mixClockPositionMs=0;
+  private int mixPosition(){return playing?(int)Math.min(getMixDuration(),Math.max(0,android.os.SystemClock.elapsedRealtime()-mixClockStartedAt)):mixClockPositionMs;}
+  private void positionMix(int ms){mixClockPositionMs=Math.max(0,Math.min(getMixDuration(),ms));if(playing)mixClockStartedAt=android.os.SystemClock.elapsedRealtime()-mixClockPositionMs;for(Track t:tracks){try{t.player.pause();int local=mixClockPositionMs-t.startAtMs;t.player.seekTo(t.trimStartMs+Math.max(0,Math.min(local,t.trimEndMs-t.trimStartMs)));t.scheduledActive=false;}catch(Exception ignored){}}updateVolumes();}
   private final Handler clipHandler=new Handler(Looper.getMainLooper());
-  private final Runnable clipMonitor=new Runnable(){public void run(){for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}updateVolumes();updateMasterTimeline();updateTrackProgress();clipHandler.postDelayed(this,80);}};
+  private final Runnable clipMonitor=new Runnable(){public void run(){if(playing){int now=mixPosition();for(Track t:tracks){try{int local=now-t.startAtMs;if(local>=0&&local<t.trimEndMs-t.trimStartMs&&!t.scheduledActive&&(!hasSolo()||t.solo)){t.player.seekTo(t.trimStartMs+local);updateVolumes();t.player.start();t.scheduledActive=true;}if(local>=t.trimEndMs-t.trimStartMs&&t.scheduledActive&&!t.loop.isChecked()){t.player.pause();t.scheduledActive=false;}}catch(Exception ignored){}}if(now>=getMixDuration()){playing=false;mixClockPositionMs=getMixDuration();}}for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}updateVolumes();updateMasterTimeline();updateTrackProgress();clipHandler.postDelayed(this,80);}};
   private final Handler rhythmHandler = new Handler(Looper.getMainLooper());
   private AudioTrack rhythmTone;
   private boolean rhythmEnabled=false;
@@ -55,7 +59,7 @@ public class MainActivity extends Activity {
   private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,Math.min(400,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));if(rhythmPattern==2)bpm=Math.min(400,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText("Rhythm guide • "+bpm+" BPM • audible cue");rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
   private final int bg = Color.rgb(16,13,24), panel = Color.rgb(34,25,45), accent = Color.rgb(187,115,213);
   private static class Track {
-    MediaPlayer player; Uri uri; SeekBar volume; SeekBar speed; SeekBar progress; TextView progressLabel; boolean draggingProgress=false; CheckBox loop; TextView label; LinearLayout card; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0,fadeInMs=0,fadeOutMs=0;
+    MediaPlayer player; Uri uri; SeekBar volume; SeekBar speed; SeekBar progress; TextView progressLabel; boolean draggingProgress=false; CheckBox loop; TextView label; LinearLayout card; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0,fadeInMs=0,fadeOutMs=0,startAtMs=0; boolean scheduledActive=false; TextView startLabel;
     Track(MediaPlayer p,Uri u){player=p;uri=u;}
   }
   @Override public void onCreate(Bundle b){
@@ -75,16 +79,16 @@ public class MainActivity extends Activity {
     Button play=button("▶ Play mix");controls.addView(play,new LinearLayout.LayoutParams(0,-2,1));
     Button pause=button("Ⅱ Pause");controls.addView(pause,new LinearLayout.LayoutParams(0,-2,1));
     Button reset=button("↺ Restart edited mix");controls.addView(reset,new LinearLayout.LayoutParams(0,-2,1));
-    play.setOnClickListener(v->{if(tracks.isEmpty()){status.setText("Add an audio file first.");return;}int count=0;for(Track t:tracks){try{if(!hasSolo()||t.solo){if(t.player.getCurrentPosition()>=t.trimEndMs)t.player.seekTo(t.trimStartMs);updateVolumes();t.player.start();count++;}}catch(Exception e){status.setText("Playback error: "+e.getMessage());}}if(count>0){playing=true;status.setText("Playing "+count+" track(s)");}});
-    pause.setOnClickListener(v->{for(Track t:tracks)if(t.player.isPlaying())t.player.pause();playing=false;status.setText("Paused");});
-    reset.setOnClickListener(v->{for(Track t:tracks){t.player.pause();t.player.seekTo(t.trimStartMs);}playing=false;status.setText("Reset to start");});
+    play.setOnClickListener(v->{if(tracks.isEmpty()){status.setText("Add an audio file first.");return;}if(!playing){playing=true;mixClockStartedAt=android.os.SystemClock.elapsedRealtime()-mixClockPositionMs;for(Track t:tracks)t.scheduledActive=false;status.setText("Playing mix with scheduled start times");}});
+    pause.setOnClickListener(v->{mixClockPositionMs=mixPosition();playing=false;for(Track t:tracks){if(t.player.isPlaying())t.player.pause();t.scheduledActive=false;}status.setText("Paused");});
+    reset.setOnClickListener(v->{playing=false;positionMix(0);status.setText("Reset to start");});
     TextView timelineTitle=text("Mix position",14,true);timelineTitle.setPadding(0,14,0,4);root.addView(timelineTitle);
     masterTime=text("0:00 / 0:00",14,false);root.addView(masterTime);
     masterSeek=new SeekBar(this);masterSeek.setMax(1);root.addView(masterSeek);
     masterSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
       public void onProgressChanged(SeekBar bar,int value,boolean user){if(user){masterTime.setText(clock(value)+" / "+clock(getMixDuration()));}}
       public void onStartTrackingTouch(SeekBar bar){draggingMaster=true;}
-      public void onStopTrackingTouch(SeekBar bar){int target=bar.getProgress();for(Track t:tracks){try{t.player.seekTo(Math.min(t.trimEndMs,t.trimStartMs+target));}catch(Exception ignored){}}draggingMaster=false;updateMasterTimeline();}
+      public void onStopTrackingTouch(SeekBar bar){int target=bar.getProgress();positionMix(target);draggingMaster=false;updateMasterTimeline();}
     });
     Button saveProject=button("💾 Save Project (instant)");root.addView(saveProject);saveProject.setOnClickListener(v->saveProject());
     Button openProject=button("📂 My Projects");root.addView(openProject);openProject.setOnClickListener(v->showProjects());
@@ -175,6 +179,13 @@ public class MainActivity extends Activity {
       Button solo=button("▶ Track");row.addView(solo);solo.setOnClickListener(v->{if(player.isPlaying()){player.pause();solo.setText("▶ Track");}else{updateVolumes();player.start();solo.setText("Ⅱ Track");}});
       Button mute=button("Mute");row.addView(mute);mute.setOnClickListener(v->{t.muted=!t.muted;mute.setText(t.muted?"Unmute":"Mute");updateVolumes();});
       Button isolate=button("Solo");row.addView(isolate);isolate.setOnClickListener(v->{t.solo=!t.solo;isolate.setText(t.solo?"Unsolo":"Solo");updateVolumes();});
+      TextView startLabel=text("Start at: 0:00",13,true);card.addView(startLabel);t.startLabel=startLabel;
+      SeekBar startAt=new SeekBar(this);startAt.setMax(600000);startAt.setProgress(0);card.addView(startAt);
+      startAt.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+        public void onProgressChanged(SeekBar b,int p,boolean user){if(user){t.startAtMs=p;startLabel.setText("Start at: "+clock(p));updateMasterTimeline();}}
+        public void onStartTrackingTouch(SeekBar b){}
+        public void onStopTrackingTouch(SeekBar b){if(playing)positionMix(mixPosition());}
+      });
       TextView seekTitle=text("Track progress • 0:00 / "+clock(t.trimEndMs-t.trimStartMs),13,false);card.addView(seekTitle);t.progressLabel=seekTitle;
       SeekBar seek=new SeekBar(this);seek.setMax(Math.max(1,t.trimEndMs-t.trimStartMs));seek.setProgress(0);card.addView(seek);t.progress=seek;
       seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
@@ -217,11 +228,10 @@ public class MainActivity extends Activity {
       updateVolumes();status.setText("Fades active: in "+(t.fadeInMs/1000)+"s • out "+(t.fadeOutMs/1000)+"s. Restart track to hear fade-in.");
     }).show();
   }
-  private int getMixDuration(){int max=0;for(Track t:tracks)max=Math.max(max,t.trimEndMs-t.trimStartMs);return max;}
+  private int getMixDuration(){int max=0;for(Track t:tracks)max=Math.max(max,t.startAtMs+t.trimEndMs-t.trimStartMs);return max;}
   private void updateMasterTimeline(){
     if(masterSeek==null||masterTime==null||draggingMaster)return;
-    int duration=getMixDuration(),position=0;
-    for(Track t:tracks){try{position=Math.max(position,Math.max(0,t.player.getCurrentPosition()-t.trimStartMs));}catch(Exception ignored){}}
+    int duration=getMixDuration(),position=mixPosition();
     masterSeek.setMax(Math.max(1,duration));masterSeek.setProgress(Math.min(position,duration));
     masterTime.setText(clock(position)+" / "+clock(duration));
   }
@@ -353,7 +363,7 @@ public class MainActivity extends Activity {
       final String projectName=name;
       final ArrayList<JSONObject> snapshots=new ArrayList<>();
       try{for(Track t:tracks){
-        JSONObject item=new JSONObject();item.put("uri",t.uri.toString());item.put("volume",t.volume.getProgress());item.put("loop",t.loop.isChecked());item.put("speed",t.speed.getProgress());item.put("start",t.trimStartMs);item.put("end",t.trimEndMs);item.put("fadeIn",t.fadeInMs);item.put("fadeOut",t.fadeOutMs);item.put("mute",t.muted);item.put("solo",t.solo);snapshots.add(item);
+        JSONObject item=new JSONObject();item.put("uri",t.uri.toString());item.put("volume",t.volume.getProgress());item.put("loop",t.loop.isChecked());item.put("speed",t.speed.getProgress());item.put("start",t.trimStartMs);item.put("end",t.trimEndMs);item.put("fadeIn",t.fadeInMs);item.put("fadeOut",t.fadeOutMs);item.put("startAt",t.startAtMs);item.put("mute",t.muted);item.put("solo",t.solo);snapshots.add(item);
       }}catch(Exception e){status.setText("Cannot prepare project: "+e.getMessage());return;}
       status.setText("Saving project audio…");
       new Thread(()->{
@@ -397,7 +407,7 @@ public class MainActivity extends Activity {
         Track t=tracks.get(tracks.size()-1);
         t.volume.setProgress(item.optInt("volume",100));t.speed.setProgress(item.optInt("speed",50));
         t.trimStartMs=item.optInt("start",0);t.trimEndMs=Math.min(t.player.getDuration(),item.optInt("end",t.player.getDuration()));
-        t.fadeInMs=item.optInt("fadeIn",0);t.fadeOutMs=item.optInt("fadeOut",0);
+        t.fadeInMs=item.optInt("fadeIn",0);t.fadeOutMs=item.optInt("fadeOut",0);t.startAtMs=item.optInt("startAt",0);if(t.startLabel!=null)t.startLabel.setText("Start at: "+clock(t.startAtMs));
         t.muted=item.optBoolean("mute",false);t.solo=item.optBoolean("solo",false);
         t.loop.setChecked(item.optBoolean("loop",false));t.player.seekTo(t.trimStartMs);
       }
