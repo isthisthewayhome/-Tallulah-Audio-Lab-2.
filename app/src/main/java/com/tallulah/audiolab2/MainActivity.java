@@ -27,6 +27,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import android.content.ContentValues;
 import android.provider.MediaStore;
+import org.json.JSONObject;
+import org.json.JSONArray;
+import java.io.FileOutputStream;
+import java.io.FileInputStream;
 
 public class MainActivity extends Activity {
   private static final int PICK_AUDIO = 51;
@@ -51,7 +55,7 @@ public class MainActivity extends Activity {
   private final Runnable rhythmTask=new Runnable(){@Override public void run(){if(!rhythmEnabled)return;try{if(rhythmTone!=null)playSoftPulse();}catch(Exception ignored){}rhythmTick++;int bpm=rhythmBpm;if(rhythmPattern==1)bpm=Math.max(15,Math.min(400,rhythmBpm+(int)(30*Math.sin(rhythmTick/5.0))));if(rhythmPattern==2)bpm=Math.min(400,rhythmBpm+rhythmTick/4);if(rhythmStatus!=null)rhythmStatus.setText("Rhythm guide • "+bpm+" BPM • audible cue");rhythmHandler.postDelayed(this,60000L/Math.max(1,bpm));}};
   private final int bg = Color.rgb(16,13,24), panel = Color.rgb(34,25,45), accent = Color.rgb(187,115,213);
   private static class Track {
-    MediaPlayer player; Uri uri; SeekBar volume; CheckBox loop; TextView label; LinearLayout card; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0,fadeInMs=0,fadeOutMs=0;
+    MediaPlayer player; Uri uri; SeekBar volume; SeekBar speed; CheckBox loop; TextView label; LinearLayout card; boolean muted=false, solo=false; int trimStartMs=0,trimEndMs=0,fadeInMs=0,fadeOutMs=0;
     Track(MediaPlayer p,Uri u){player=p;uri=u;}
   }
   @Override public void onCreate(Bundle b){
@@ -82,7 +86,9 @@ public class MainActivity extends Activity {
       public void onStartTrackingTouch(SeekBar bar){draggingMaster=true;}
       public void onStopTrackingTouch(SeekBar bar){int target=bar.getProgress();for(Track t:tracks){try{t.player.seekTo(Math.min(t.trimEndMs,t.trimStartMs+target));}catch(Exception ignored){}}draggingMaster=false;updateMasterTimeline();}
     });
-    Button saveMix=button("💾 Save edited audio");root.addView(saveMix);
+    Button saveProject=button("💾 Save Project (instant)");root.addView(saveProject);saveProject.setOnClickListener(v->saveProject());
+    Button openProject=button("📂 My Projects");root.addView(openProject);openProject.setOnClickListener(v->showProjects());
+    Button saveMix=button("⬇ Export WAV audio");root.addView(saveMix);
     saveMix.setOnClickListener(v->saveEditedAudio());
     status=text("Ready to import audio",14,false);status.setTextColor(0xffcbb5d5);status.setPadding(0,16,0,14);root.addView(status);
     TextView title=text("Audio layers",23,true);title.setPadding(0,24,0,8);root.addView(title);
@@ -175,7 +181,7 @@ public class MainActivity extends Activity {
       Button clipEdit=button("✂ Trim clip");card.addView(clipEdit);clipEdit.setOnClickListener(v->showTrimEditor(t));
       Button fades=button("◐ Fade in / Fade out");card.addView(fades);fades.setOnClickListener(v->showFadeEditor(t));
       TextView speedLabel=text("Speed 1.00×",13,false);card.addView(speedLabel);
-      SeekBar speed=new SeekBar(this);speed.setMax(150);speed.setProgress(50);card.addView(speed);
+      SeekBar speed=new SeekBar(this);t.speed=speed;speed.setMax(150);speed.setProgress(50);card.addView(speed);
       speed.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){float rate=0.5f+p/100f;speedLabel.setText(String.format(java.util.Locale.US,"Speed %.2f×",rate));try{player.setPlaybackParams(player.getPlaybackParams().setSpeed(rate));}catch(Exception ignored){}}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
       Button remove=button("✕");row.addView(remove);remove.setOnClickListener(v->{player.release();tracks.remove(t);trackList.removeView(card);status.setText("Track removed");});
       status.setText("Imported "+tracks.size()+" track(s)");
@@ -322,6 +328,66 @@ public class MainActivity extends Activity {
       }catch(Exception e){if(destination!=null)getContentResolver().delete(destination,null,null);String message=e.getMessage();runOnUiThread(()->status.setText("Mix export failed: "+message));}
       finally{if(a!=null)a.file.delete();if(b!=null)b.file.delete();if(originalA!=null)originalA.file.delete();if(originalB!=null)originalB.file.delete();if(wavFile!=null)wavFile.delete();}
     },"TwoTrackExport").start();
+  }
+  private File projectRoot(){File dir=new File(getFilesDir(),"projects");dir.mkdirs();return dir;}
+  private void saveProject(){
+    if(tracks.isEmpty()){status.setText("Add audio before saving a project");return;}
+    EditText input=new EditText(this);input.setSingleLine(true);input.setText("My Mix");
+    new android.app.AlertDialog.Builder(this).setTitle("Save project").setView(input).setNegativeButton("Cancel",null).setPositiveButton("Save",(dialog,which)->{
+      String name=input.getText().toString().trim();if(name.isEmpty())name="My Mix";
+      final String projectName=name;
+      final ArrayList<JSONObject> snapshots=new ArrayList<>();
+      try{for(Track t:tracks){
+        JSONObject item=new JSONObject();item.put("uri",t.uri.toString());item.put("volume",t.volume.getProgress());item.put("loop",t.loop.isChecked());item.put("speed",t.speed.getProgress());item.put("start",t.trimStartMs);item.put("end",t.trimEndMs);item.put("fadeIn",t.fadeInMs);item.put("fadeOut",t.fadeOutMs);item.put("mute",t.muted);item.put("solo",t.solo);snapshots.add(item);
+      }}catch(Exception e){status.setText("Cannot prepare project: "+e.getMessage());return;}
+      status.setText("Saving project audio…");
+      new Thread(()->{
+        File folder=new File(projectRoot(),"project_"+System.currentTimeMillis());
+        try{
+          if(!folder.mkdirs())throw new Exception("Cannot create project folder");
+          JSONArray saved=new JSONArray();
+          for(int i=0;i<snapshots.size();i++){
+            JSONObject item=snapshots.get(i);File audio=new File(folder,"track_"+i+".audio");
+            try(InputStream in=getContentResolver().openInputStream(Uri.parse(item.getString("uri")));OutputStream out=new FileOutputStream(audio)){
+              if(in==null)throw new Exception("Missing source audio");byte[] buf=new byte[65536];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);
+            }
+            item.remove("uri");item.put("file",audio.getName());saved.put(item);
+          }
+          JSONObject project=new JSONObject();project.put("version",1);project.put("name",projectName);project.put("tracks",saved);
+          try(OutputStream out=new FileOutputStream(new File(folder,"project.json"))){out.write(project.toString().getBytes("UTF-8"));}
+          runOnUiThread(()->status.setText("Project saved: "+projectName+" • "+snapshots.size()+" tracks"));
+        }catch(Exception e){deleteProjectFolder(folder);String message=e.getMessage();runOnUiThread(()->status.setText("Project save failed: "+message));}
+      },"SaveProject").start();
+    }).show();
+  }
+  private void deleteProjectFolder(File folder){File[] files=folder.listFiles();if(files!=null)for(File file:files)file.delete();folder.delete();}
+  private void showProjects(){
+    File[] all=projectRoot().listFiles(file->file.isDirectory()&&new File(file,"project.json").exists());
+    if(all==null||all.length==0){status.setText("No saved projects yet");return;}
+    java.util.Arrays.sort(all,(a,b)->Long.compare(b.lastModified(),a.lastModified()));
+    String[] labels=new String[all.length];
+    for(int i=0;i<all.length;i++){try(InputStream in=new FileInputStream(new File(all[i],"project.json"))){byte[] bytes=new byte[(int)Math.min(65536,new File(all[i],"project.json").length())];int n=in.read(bytes);labels[i]=new JSONObject(new String(bytes,0,Math.max(0,n),"UTF-8")).optString("name","Project");}catch(Exception e){labels[i]="Project "+(i+1);}}
+    new android.app.AlertDialog.Builder(this).setTitle("My Projects").setItems(labels,(dialog,index)->openProject(all[index])).setNegativeButton("Cancel",null).show();
+  }
+  private void openProject(File folder){
+    try{
+      File jsonFile=new File(folder,"project.json");byte[] bytes=new byte[(int)jsonFile.length()];
+      try(InputStream in=new FileInputStream(jsonFile)){int offset=0,n;while(offset<bytes.length&&(n=in.read(bytes,offset,bytes.length-offset))>0)offset+=n;}
+      JSONObject project=new JSONObject(new String(bytes,"UTF-8"));JSONArray items=project.getJSONArray("tracks");
+      for(int i=0;i<items.length();i++){File audio=new File(folder,items.getJSONObject(i).getString("file"));if(!audio.exists())throw new Exception("Missing saved track "+(i+1));}
+      for(Track t:tracks){try{t.player.release();}catch(Exception ignored){}}
+      tracks.clear();trackList.removeAllViews();
+      for(int i=0;i<items.length();i++){
+        JSONObject item=items.getJSONObject(i);load(Uri.fromFile(new File(folder,item.getString("file"))));
+        Track t=tracks.get(tracks.size()-1);
+        t.volume.setProgress(item.optInt("volume",100));t.speed.setProgress(item.optInt("speed",50));
+        t.trimStartMs=item.optInt("start",0);t.trimEndMs=Math.min(t.player.getDuration(),item.optInt("end",t.player.getDuration()));
+        t.fadeInMs=item.optInt("fadeIn",0);t.fadeOutMs=item.optInt("fadeOut",0);
+        t.muted=item.optBoolean("mute",false);t.solo=item.optBoolean("solo",false);
+        t.loop.setChecked(item.optBoolean("loop",false));t.player.seekTo(t.trimStartMs);
+      }
+      updateVolumes();status.setText("Opened project: "+project.optString("name","My Mix"));
+    }catch(Exception e){status.setText("Could not open project: "+e.getMessage());}
   }
   private void saveEditedAudio(){
     if(tracks.isEmpty()){status.setText("Add audio before saving.");return;}
