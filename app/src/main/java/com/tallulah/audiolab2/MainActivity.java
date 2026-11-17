@@ -189,6 +189,36 @@ public class MainActivity extends Activity {
       public void onStopTrackingTouch(SeekBar bar){}
     });
     syncNow.setOnClickListener(v->{if(!strokeSync){strokeMode.setChecked(true);}resetStrokeClock();rhythmStatus.setText("Sync reference reset • fine-tune offset with − / +");});
+    TextView tapTitle=text("Tap to Match • one tap per complete stroke",16,true);rhythmCard.addView(tapTitle);
+    TextView tapResult=text("Tap at the same point each cycle. Use 5–10 taps for a stable estimate.",13,false);rhythmCard.addView(tapResult);
+    Button tapMatch=button("◎ TAP EACH FULL STROKE");rhythmCard.addView(tapMatch);
+    Button tapClear=button("Reset tap measurement");rhythmCard.addView(tapClear);
+    final java.util.ArrayList<Long> tapTimes=new java.util.ArrayList<>();
+    tapClear.setOnClickListener(v->{tapTimes.clear();tapResult.setText("Ready • tap once per full back-and-forth stroke");});
+    tapMatch.setOnClickListener(v->{
+      long now=android.os.SystemClock.uptimeMillis();
+      if(!tapTimes.isEmpty()&&now-tapTimes.get(tapTimes.size()-1)>2500)tapTimes.clear();
+      tapTimes.add(now);
+      if(tapTimes.size()>12)tapTimes.remove(0);
+      if(tapTimes.size()<3){tapResult.setText("Keep tapping • "+tapTimes.size()+" taps recorded");return;}
+      java.util.ArrayList<Long> intervals=new java.util.ArrayList<>();
+      for(int i=1;i<tapTimes.size();i++)intervals.add(tapTimes.get(i)-tapTimes.get(i-1));
+      java.util.Collections.sort(intervals);
+      long median=intervals.get(intervals.size()/2);
+      if(intervals.size()%2==0)median=(median+intervals.get(intervals.size()/2-1))/2;
+      if(median<=0)return;
+      double measuredBps=1000.0/median;
+      if(measuredBps<0.5||measuredBps>10.0){
+        tapResult.setText(String.format(java.util.Locale.US,"Measured %.2f BPS • outside slider range (0.5–10.0)",measuredBps));return;
+      }
+      int position=Math.max(0,Math.min(95,(int)Math.round(measuredBps*10)-5));
+      tempoSlider.setProgress(position);
+      if(!strokeMode.isChecked())strokeMode.setChecked(true);
+      // Anchor timing to the most recent tap rather than the time the UI updates.
+      strokeAnchorMs=now;
+      rescheduleStrokeClock();
+      tapResult.setText(String.format(java.util.Locale.US,"Measured %.2f BPS • set %.1f BPS • %d taps. Keep tapping to refine.",measuredBps,rhythmBpm/60.0,tapTimes.size()));
+    });
     TextView soundLabel=text("Rhythm sound",16,true);rhythmCard.addView(soundLabel);
     Spinner soundPicker=new Spinner(this);
     String[] soundNames={"Original Soft Thump","Deep Bass","Heartbeat","Sharp Tap","Electronic Pulse"};
