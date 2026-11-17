@@ -192,8 +192,23 @@ public class MainActivity extends Activity {
     syncNow.setOnClickListener(v->{if(!strokeSync){strokeMode.setChecked(true);}resetStrokeClock();rhythmStatus.setText("Sync reference reset • fine-tune offset with − / +");});
     TextView tapTitle=text("Tap to Match • one tap per complete stroke",16,true);rhythmCard.addView(tapTitle);
     TextView tapResult=text("Tap at the same point each cycle. Use 5–10 taps for a stable estimate.",13,false);rhythmCard.addView(tapResult);
-    Button tapMatch=button("◎ TAP EACH FULL STROKE");rhythmCard.addView(tapMatch);
-    Button tapClear=button("Reset tap measurement");rhythmCard.addView(tapClear);
+    // Large circular touch target for tapping along with the machine.
+    LinearLayout tapCenter=new LinearLayout(this);tapCenter.setGravity(android.view.Gravity.CENTER);tapCenter.setOrientation(LinearLayout.VERTICAL);rhythmCard.addView(tapCenter);
+    Button tapMatch=button("TAP");
+    GradientDrawable tapCircle=new GradientDrawable();
+    tapCircle.setShape(GradientDrawable.OVAL);
+    tapCircle.setColor(Color.rgb(155,104,222));
+    tapCircle.setStroke(dp(3),Color.rgb(210,181,250));
+    tapMatch.setBackground(tapCircle);
+    tapMatch.setTextColor(Color.BLACK);tapMatch.setTextSize(25);tapMatch.setAllCaps(false);
+    tapMatch.setPadding(0,0,0,0);
+    tapCenter.addView(tapMatch,new LinearLayout.LayoutParams(dp(192),dp(192)));
+    Button tapClear=button("Reset");
+    tapClear.setTextSize(12);tapClear.setAllCaps(false);
+    LinearLayout.LayoutParams resetParams=new LinearLayout.LayoutParams(dp(110),dp(44));
+    resetParams.gravity=android.view.Gravity.CENTER_HORIZONTAL;
+    resetParams.topMargin=dp(8);
+    tapCenter.addView(tapClear,resetParams);
     final java.util.ArrayList<Long> tapTimes=new java.util.ArrayList<>();
     tapClear.setOnClickListener(v->{tapTimes.clear();tapResult.setText("Ready • tap once per full back-and-forth stroke");});
     tapMatch.setOnClickListener(v->{
