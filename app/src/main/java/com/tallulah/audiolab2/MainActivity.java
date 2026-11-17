@@ -216,32 +216,64 @@ public class MainActivity extends Activity {
     masterTime.setText(clock(position)+" / "+clock(duration));
   }
   private void saveEditedAudio(){
-    if(tracks.size()!=1){status.setText("Saving a combined multi-track mix is not available yet. Use one edited track.");return;}
+    if(tracks.isEmpty()){status.setText("Add audio before saving.");return;}
+    if(tracks.size()!=1){status.setText("Multi-layer export is next. This version exports one edited layer.");return;}
     Track t=tracks.get(0);
-    if(t.trimStartMs>0||t.trimEndMs<t.player.getDuration()-150||t.fadeInMs>0||t.fadeOutMs>0){
-      status.setText("This track has playback-only edits. Export with fades and trims needs the mix renderer; nothing saved.");return;
-    }
-    Uri source=t.uri;
-    status.setText("Saving audio to Music/Tallulah Audio Lab…");
+    status.setText("Rendering edited audio…");
+    final Uri source=t.uri;
+    final int start=t.trimStartMs,end=t.trimEndMs,fadeIn=t.fadeInMs,fadeOut=t.fadeOutMs,volume=t.volume.getProgress();
     new Thread(()->{
-      Uri dest=null;
+      MediaExtractor extractor=null;MediaCodec decoder=null;RandomAccessFile wav=null;File temp=null;Uri dest=null;
       try{
-        String mime=getContentResolver().getType(source);if(mime==null)mime="audio/wav";
-        String ext=mime.contains("mpeg")?"mp3":mime.contains("mp4")?"m4a":mime.contains("ogg")?"ogg":"wav";
-        ContentValues values=new ContentValues();values.put(MediaStore.Audio.Media.DISPLAY_NAME,"Tallulah_Edit_"+System.currentTimeMillis()+"."+ext);
-        values.put(MediaStore.Audio.Media.MIME_TYPE,mime);
-        values.put(MediaStore.Audio.Media.RELATIVE_PATH,"Music/Tallulah Audio Lab");
-        values.put(MediaStore.Audio.Media.IS_PENDING,1);
-        dest=getContentResolver().insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,values);
-        if(dest==null)throw new Exception("Could not create file");
-        try(InputStream in=getContentResolver().openInputStream(source);OutputStream out=getContentResolver().openOutputStream(dest)){
-          if(in==null||out==null)throw new Exception("Could not open audio stream");
-          byte[] buffer=new byte[32768];int n;while((n=in.read(buffer))!=-1)out.write(buffer,0,n);
+        extractor=new MediaExtractor();extractor.setDataSource(this,source,null);
+        int track=-1;MediaFormat format=null;
+        for(int i=0;i<extractor.getTrackCount();i++){MediaFormat candidate=extractor.getTrackFormat(i);String mime=candidate.getString(MediaFormat.KEY_MIME);if(mime!=null&&mime.startsWith("audio/")){track=i;format=candidate;break;}}
+        if(track<0)throw new Exception("No audio stream found");
+        extractor.selectTrack(track);
+        decoder=MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME));decoder.configure(format,null,null,0);decoder.start();
+        extractor.seekTo(start*1000L,MediaExtractor.SEEK_TO_PREVIOUS_SYNC);
+        temp=File.createTempFile("tallulah_export_",".wav",getCacheDir());
+        wav=new RandomAccessFile(temp,"rw");wav.write(new byte[44]);
+        int rate=format.getInteger(MediaFormat.KEY_SAMPLE_RATE),channels=format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+        long written=0;boolean inputDone=false,outputDone=false;MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
+        while(!outputDone){
+          if(!inputDone){int idx=decoder.dequeueInputBuffer(10000);if(idx>=0){ByteBuffer input=decoder.getInputBuffer(idx);input.clear();int size=extractor.readSampleData(input,0);long time=extractor.getSampleTime();if(size<0||time>=end*1000L){decoder.queueInputBuffer(idx,0,0,0,MediaCodec.BUFFER_FLAG_END_OF_STREAM);inputDone=true;}else{decoder.queueInputBuffer(idx,0,size,Math.max(0,time),0);extractor.advance();}}}
+          int idx=decoder.dequeueOutputBuffer(info,10000);
+          if(idx==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){
+            MediaFormat actual=decoder.getOutputFormat();rate=actual.getInteger(MediaFormat.KEY_SAMPLE_RATE);channels=actual.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+            if(actual.containsKey(MediaFormat.KEY_PCM_ENCODING)&&actual.getInteger(MediaFormat.KEY_PCM_ENCODING)!=2)throw new Exception("This decoder does not output 16-bit PCM");
+          }else if(idx>=0){
+            if(info.size>0&&info.presentationTimeUs>=start*1000L&&info.presentationTimeUs<end*1000L){
+              ByteBuffer pcm=decoder.getOutputBuffer(idx);pcm.position(info.offset);pcm.limit(info.offset+info.size);
+              byte[] data=new byte[info.size];pcm.get(data);
+              int usable=data.length-(data.length%2);
+              for(int j=0;j<usable;j+=2){
+                long sampleTime=info.presentationTimeUs+(long)(j/(2*channels))*1000000L/rate;
+                float gain=volume/100f;
+                long elapsed=sampleTime-start*1000L,remaining=end*1000L-sampleTime;
+                if(fadeIn>0)gain*=Math.max(0f,Math.min(1f,elapsed/(fadeIn*1000f)));
+                if(fadeOut>0)gain*=Math.max(0f,Math.min(1f,remaining/(fadeOut*1000f)));
+                short sample=(short)((data[j]&255)|(data[j+1]<<8));
+                int adjusted=Math.max(-32768,Math.min(32767,Math.round(sample*gain)));
+                data[j]=(byte)adjusted;data[j+1]=(byte)(adjusted>>8);
+              }
+              wav.write(data,0,usable);written+=usable;
+            }
+            if((info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0)outputDone=true;
+            decoder.releaseOutputBuffer(idx,false);
+          }
         }
+        if(written==0||written>0xffffffffL-36)throw new Exception("No audio produced or clip too long");
+        wav.seek(0);wav.writeBytes("RIFF");writeLe(wav,(int)(36+written));wav.writeBytes("WAVEfmt ");writeLe(wav,16);writeShortLe(wav,1);writeShortLe(wav,channels);writeLe(wav,rate);writeLe(wav,rate*channels*2);writeShortLe(wav,channels*2);writeShortLe(wav,16);wav.writeBytes("data");writeLe(wav,(int)written);wav.close();wav=null;
+        ContentValues values=new ContentValues();values.put(MediaStore.Audio.Media.DISPLAY_NAME,"Tallulah_Mix_"+System.currentTimeMillis()+".wav");
+        values.put(MediaStore.Audio.Media.MIME_TYPE,"audio/wav");values.put(MediaStore.Audio.Media.RELATIVE_PATH,"Music/Tallulah Audio Lab");values.put(MediaStore.Audio.Media.IS_PENDING,1);
+        dest=getContentResolver().insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,values);if(dest==null)throw new Exception("Cannot create destination");
+        try(InputStream in=new java.io.FileInputStream(temp);OutputStream out=getContentResolver().openOutputStream(dest)){if(out==null)throw new Exception("Cannot write destination");byte[] buf=new byte[32768];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);}
         values.clear();values.put(MediaStore.Audio.Media.IS_PENDING,0);getContentResolver().update(dest,values,null,null);
-        runOnUiThread(()->status.setText("Saved to Music/Tallulah Audio Lab"));
-      }catch(Exception e){if(dest!=null)getContentResolver().delete(dest,null,null);String error=e.getMessage();runOnUiThread(()->status.setText("Save failed: "+error));}
-    }).start();
+        runOnUiThread(()->status.setText("Saved edited WAV to Music/Tallulah Audio Lab"));
+      }catch(Exception e){if(dest!=null)getContentResolver().delete(dest,null,null);String message=e.getMessage();runOnUiThread(()->status.setText("Export failed: "+message));}
+      finally{if(wav!=null)try{wav.close();}catch(Exception ignored){}if(decoder!=null){try{decoder.stop();}catch(Exception ignored){}decoder.release();}if(extractor!=null)extractor.release();if(temp!=null)temp.delete();}
+    },"AudioExport").start();
   }
   private String clock(int ms){
     int seconds=Math.max(0,ms)/1000;
