@@ -43,6 +43,15 @@ public class MainActivity extends Activity {
   private final Handler hismithBleHandler=new Handler(Looper.getMainLooper());
   private boolean hismithScanning=false;
   private TextView hismithLiveStatus;
+  private TextView hismithCandidateStatus;
+  private TextView hismithHistoryStatus;
+  private final java.util.ArrayDeque<String> hismithHistory=new java.util.ArrayDeque<>();
+  private void renderHismithHistory(){
+    if(hismithHistoryStatus==null)return;
+    StringBuilder b=new StringBuilder("Recent BLE messages (newest first):");
+    for(String line:hismithHistory)b.append("\n").append(line);
+    hismithHistoryStatus.setText(b.toString());
+  }
   private final java.util.ArrayDeque<android.bluetooth.BluetoothGattCharacteristic> hismithNotifyQueue=new java.util.ArrayDeque<>();
   private boolean hismithMonitorActive=false;
   private int hismithPacketCount=0;
@@ -76,6 +85,8 @@ public class MainActivity extends Activity {
       hismithLiveStatus.setText("Connect to HISMITH and discover services first.");return;
     }
     hismithNotifyQueue.clear();hismithPacketCount=0;hismithLastPacket="None";hismithMonitorActive=true;
+    hismithHistory.clear();renderHismithHistory();
+    if(hismithCandidateStatus!=null)hismithCandidateStatus.setText("Candidate speed: waiting for AA 03 packets (unverified)");
     for(android.bluetooth.BluetoothGattService service:hismithGatt.getServices()){
       String serviceId=service.getUuid().toString();
       if(!serviceId.startsWith("0000ffe0-")&&!serviceId.startsWith("0000ffc0-"))continue;
@@ -156,9 +167,24 @@ public class MainActivity extends Activity {
           nextHismithSubscription(g);
         }
         @Override public void onCharacteristicChanged(android.bluetooth.BluetoothGatt g,android.bluetooth.BluetoothGattCharacteristic c,byte[] value){
-          hismithPacketCount++;
-          hismithLastPacket=c.getUuid().toString().substring(4,8)+" : "+bleHex(value);
-          runOnUiThread(()->{if(hismithLiveStatus!=null)hismithLiveStatus.setText("Notifications: "+hismithPacketCount+"\nLast: "+hismithLastPacket);});
+          if(!hismithMonitorActive||g!=hismithGatt)return;
+          final byte[] packet=value==null?new byte[0]:value.clone();
+          final String characteristic=c.getUuid().toString().substring(4,8);
+          runOnUiThread(()->{
+            if(!hismithMonitorActive||g!=hismithGatt)return;
+            hismithPacketCount++;
+            hismithLastPacket=characteristic+" : "+bleHex(packet);
+            if(hismithLiveStatus!=null)hismithLiveStatus.setText("Notifications: "+hismithPacketCount+"\nLast: "+hismithLastPacket);
+            String time=new java.text.SimpleDateFormat("HH:mm:ss.SSS",java.util.Locale.US).format(new java.util.Date());
+            hismithHistory.addFirst(time+" • "+hismithLastPacket);
+            while(hismithHistory.size()>25)hismithHistory.removeLast();
+            renderHismithHistory();
+            if(hismithCandidateStatus!=null&&packet.length==4&&(packet[0]&255)==0xAA&&(packet[1]&255)==0x03){
+              int candidate=packet[2]&255;
+              boolean matching=((candidate+3)&255)==(packet[3]&255);
+              hismithCandidateStatus.setText("Candidate value: "+candidate+" / 100? (UNVERIFIED) • final-byte pattern "+(matching?"matches":"differs")+". Not measured thrust speed.");
+            }
+          });
         }
         @Override public void onCharacteristicChanged(android.bluetooth.BluetoothGatt g,android.bluetooth.BluetoothGattCharacteristic c){
           onCharacteristicChanged(g,c,c.getValue());
@@ -472,6 +498,12 @@ public class MainActivity extends Activity {
     bleDisconnectButton.setOnClickListener(v->{stopHismithScan();closeHismithGatt();hismithBleStatus.setText("Bluetooth diagnostic disconnected.");});
     hismithBleResults=new LinearLayout(this);hismithBleResults.setOrientation(1);bluetoothDiagnostics.addView(hismithBleResults);
     hismithLiveStatus=text("Live monitor off. No notifications recorded.",13,false);bluetoothDiagnostics.addView(hismithLiveStatus);
+    hismithCandidateStatus=text("Candidate speed: waiting for AA 03 packets (unverified)",15,true);bluetoothDiagnostics.addView(hismithCandidateStatus);
+    bluetoothDiagnostics.addView(text("Diagnostic only. Candidate byte is NOT verified motor speed. Compare with the original controller; keep the physical stop accessible.",12,false));
+    hismithHistoryStatus=text("Recent BLE messages: none",12,false);bluetoothDiagnostics.addView(hismithHistoryStatus);
+    Button clearBleHistory=button("Clear message history");bluetoothDiagnostics.addView(clearBleHistory);
+    clearBleHistory.setOnClickListener(v->{hismithHistory.clear();renderHismithHistory();});
+
     Button bleLive=button("Start read-only live monitor");bluetoothDiagnostics.addView(bleLive);
     bleLive.setOnClickListener(v->startHismithMonitor());
     Button bleStopLive=button("Stop live monitor and disconnect");bluetoothDiagnostics.addView(bleStopLive);
