@@ -47,6 +47,44 @@ public class MainActivity extends Activity {
   private void positionMix(int ms){mixClockPositionMs=Math.max(0,Math.min(getMixDuration(),ms));if(playing)mixClockStartedAt=android.os.SystemClock.elapsedRealtime()-mixClockPositionMs;for(Track t:tracks){try{t.player.pause();int local=mixClockPositionMs-t.startAtMs;t.player.seekTo(t.trimStartMs+Math.max(0,Math.min(local,t.trimEndMs-t.trimStartMs)));t.scheduledActive=false;}catch(Exception ignored){}}updateVolumes();}
   private final Handler clipHandler=new Handler(Looper.getMainLooper());
   private final Runnable clipMonitor=new Runnable(){public void run(){if(playing){int now=mixPosition();for(Track t:tracks){try{int local=now-t.startAtMs;if(local>=0&&local<t.trimEndMs-t.trimStartMs&&!t.scheduledActive&&(!hasSolo()||t.solo)){t.player.seekTo(t.trimStartMs+local);updateVolumes();t.player.start();t.scheduledActive=true;}if(local>=t.trimEndMs-t.trimStartMs&&t.scheduledActive&&!t.loop.isChecked()){t.player.pause();t.scheduledActive=false;}}catch(Exception ignored){}}if(now>=getMixDuration()){playing=false;mixClockPositionMs=getMixDuration();}}for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}updateVolumes();updateMasterTimeline();updateTrackProgress();clipHandler.postDelayed(this,80);}};
+  private android.media.audiofx.Visualizer levelVisualizer=null;
+  private boolean levelTestActive=false;
+  private ProgressBar audioLevelBar=null;
+  private TextView audioLevelStatus=null;
+  private int levelSessionId=-1;
+  private final Handler levelHandler=new Handler(Looper.getMainLooper());
+  private final Runnable levelMonitor=new Runnable(){public void run(){
+    if(!levelTestActive)return;
+    int session=-1;
+    for(Track t:tracks){try{if(t.player.isPlaying()){session=t.player.getAudioSessionId();break;}}catch(Exception ignored){}}
+    if(session!=levelSessionId){
+      releaseLevelVisualizer();
+      if(session>0&&android.os.Build.VERSION.SDK_INT>=23&&checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)==android.content.pm.PackageManager.PERMISSION_GRANTED){
+        try{
+          levelVisualizer=new android.media.audiofx.Visualizer(session);
+          levelVisualizer.setCaptureSize(android.media.audiofx.Visualizer.getCaptureSizeRange()[0]);
+          levelVisualizer.setEnabled(true);levelSessionId=session;
+        }catch(Exception e){releaseLevelVisualizer();if(audioLevelStatus!=null)audioLevelStatus.setText("Audio capture unavailable: "+e.getClass().getSimpleName());}
+      }
+    }
+    if(levelVisualizer!=null){
+      try{
+        byte[] wave=new byte[levelVisualizer.getCaptureSize()];
+        if(levelVisualizer.getWaveForm(wave)==android.media.audiofx.Visualizer.SUCCESS){
+          double sum=0;
+          for(byte sample:wave){int v=(sample&255)-128;sum+=v*v;}
+          int percent=Math.min(100,(int)Math.round(Math.sqrt(sum/wave.length)/128.0*180));
+          if(audioLevelBar!=null)audioLevelBar.setProgress(percent);
+          if(audioLevelStatus!=null)audioLevelStatus.setText("Audio detected • level "+percent+"%");
+        }
+      }catch(Exception ignored){}
+    }else if(audioLevelStatus!=null&&session<1)audioLevelStatus.setText("Play an imported audio track to test detection.");
+    levelHandler.postDelayed(this,120);
+  }};
+  private void releaseLevelVisualizer(){
+    if(levelVisualizer!=null){try{levelVisualizer.setEnabled(false);levelVisualizer.release();}catch(Exception ignored){}}
+    levelVisualizer=null;levelSessionId=-1;
+  }
   private final Handler goveeFlowHandler=new Handler(Looper.getMainLooper());
   private Runnable goveeFlowTask=null;
   private boolean goveeFlowActive=false;
@@ -465,6 +503,24 @@ public class MainActivity extends Activity {
     Button dreamButton=button("▶ Start Dream Sounds");dreamCard.addView(dreamButton);
     dreamButton.setOnClickListener(v->{atmosphereOn=!atmosphereOn;startAtmosphereIfNeeded();dreamButton.setText(atmosphereOn?"■ Stop Dream Sounds":"▶ Start Dream Sounds");});
     dreamCard.addView(text("Synthesized sound textures. Use stereo headphones for binaural tones.",12,false));
+    LinearLayout audioDetection=collapsibleSection(root,"Audio-Reactive Lighting • Detection Test",false);
+    audioDetection.addView(text("Test the live sound level from an imported track. This version does not change the lights.",13,false));
+    audioLevelBar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
+    audioLevelBar.setMax(100);audioLevelBar.setProgress(0);audioLevelBar.setMinHeight(dp(45));audioDetection.addView(audioLevelBar);
+    audioLevelStatus=text("Detection stopped",14,false);audioDetection.addView(audioLevelStatus);
+    Button levelStart=button("Start audio detection");audioDetection.addView(levelStart);
+    Button levelStop=button("Stop audio detection");audioDetection.addView(levelStop);
+    levelStart.setOnClickListener(v->{
+      if(android.os.Build.VERSION.SDK_INT>=23&&checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+        requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO},735);audioLevelStatus.setText("Allow audio permission, then tap Start again.");return;
+      }
+      levelTestActive=true;levelHandler.removeCallbacks(levelMonitor);levelHandler.post(levelMonitor);
+      audioLevelStatus.setText("Waiting for an imported track to play…");
+    });
+    levelStop.setOnClickListener(v->{
+      levelTestActive=false;levelHandler.removeCallbacks(levelMonitor);releaseLevelVisualizer();
+      audioLevelBar.setProgress(0);audioLevelStatus.setText("Detection stopped");
+    });
     LinearLayout lights=collapsibleSection(root,"Govee Lighting",false);
     lights.addView(text("H801D • LAN discovery test. Keep phone on the same Wi-Fi as the lights.",13,false));
     TextView lightStatus=text("Not scanned yet",14,false);lights.addView(lightStatus);
@@ -1308,5 +1364,5 @@ public class MainActivity extends Activity {
     if(rhythmTone==null)return;
     try{rhythmTone.pause();rhythmTone.setPlaybackHeadPosition(0);rhythmTone.play();}catch(Exception ignored){}
   }
-  @Override protected void onDestroy(){clipHandler.removeCallbacks(clipMonitor);atmosphereOn=false;stereoOn=false;rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
+  @Override protected void onDestroy(){levelTestActive=false;levelHandler.removeCallbacks(levelMonitor);releaseLevelVisualizer();clipHandler.removeCallbacks(clipMonitor);atmosphereOn=false;stereoOn=false;rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
 }
