@@ -530,6 +530,45 @@ public class MainActivity extends Activity {
         sendGoveeCommand(selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition()),"brightness",value,lightStatus);
       }
     });
+    TextView colorHeading=text("COLOR CONTROL",18,true);colorHeading.setTextColor(0xffD9B6FF);lights.addView(colorHeading);
+    TextView colorPreview=text("Selected color",15,true);colorPreview.setGravity(android.view.Gravity.CENTER);
+    colorPreview.setTextColor(Color.WHITE);colorPreview.setMinHeight(dp(65));lights.addView(colorPreview);
+    SeekBar hueBar=new SeekBar(this);hueBar.setMax(359);hueBar.setProgress(285);hueBar.setMinHeight(dp(68));
+    lights.addView(text("Color • Red → Purple → Blue → Green",13,false));lights.addView(hueBar);
+    SeekBar saturationBar=new SeekBar(this);saturationBar.setMax(100);saturationBar.setProgress(100);saturationBar.setMinHeight(dp(68));
+    TextView saturationText=text("Color intensity • 100%",13,false);lights.addView(saturationText);lights.addView(saturationBar);
+    final Runnable updateColorPreview=()->{
+      int rgb=Color.HSVToColor(new float[]{hueBar.getProgress(),saturationBar.getProgress()/100f,1f});
+      GradientDrawable swatch=new GradientDrawable();swatch.setColor(rgb);swatch.setCornerRadius(dp(14));
+      colorPreview.setBackground(swatch);
+      colorPreview.setTextColor((Color.red(rgb)*299+Color.green(rgb)*587+Color.blue(rgb)*114)/1000>150?Color.BLACK:Color.WHITE);
+      saturationText.setText("Color intensity • "+saturationBar.getProgress()+"%");
+    };
+    SeekBar.OnSeekBarChangeListener colorListener=new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar bar,int value,boolean user){updateColorPreview.run();}
+      public void onStartTrackingTouch(SeekBar bar){}
+      public void onStopTrackingTouch(SeekBar bar){}
+    };
+    hueBar.setOnSeekBarChangeListener(colorListener);saturationBar.setOnSeekBarChangeListener(colorListener);updateColorPreview.run();
+    Button applyColor=button("Apply selected color");lights.addView(applyColor);
+    applyColor.setOnClickListener(v->{
+      if(goveeStrobeActive){lightStatus.setText("Stop strobe/pulse before changing color.");return;}
+      int rgb=Color.HSVToColor(new float[]{hueBar.getProgress(),saturationBar.getProgress()/100f,1f});
+      sendGoveeColor(selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition()),rgb,lightStatus);
+    });
+    LinearLayout presetColors=new LinearLayout(this);presetColors.setOrientation(LinearLayout.VERTICAL);lights.addView(presetColors);
+    String[] colorNames={"Deep Red","Plum","Purple","Ocean Blue","Turquoise"};
+    int[] colorValues={0xffAA0022,0xff76235D,0xff7722CC,0xff0033CC,0xff00B5AA};
+    for(int n=0;n<colorNames.length;n++){
+      final int rgb=colorValues[n];
+      Button preset=button(colorNames[n]);presetColors.addView(preset);
+      preset.setOnClickListener(v->{
+        float[] hsv=new float[3];Color.colorToHSV(rgb,hsv);
+        hueBar.setProgress(Math.round(hsv[0]));saturationBar.setProgress(Math.round(hsv[1]*100));
+        if(goveeStrobeActive){lightStatus.setText("Stop strobe/pulse before changing color.");return;}
+        sendGoveeColor(selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition()),rgb,lightStatus);
+      });
+    }
     TextView strobeTitle=text("Strobe • current light color",16,true);lights.addView(strobeTitle);
     TextView strobeSpeed=text("Strobe speed • Slow                         Fast",13,false);lights.addView(strobeSpeed);
     SeekBar strobeSlider=new SeekBar(this);strobeSlider.setMax(3);strobeSlider.setProgress(1);strobeSlider.setMinHeight(dp(64));lights.addView(strobeSlider);
@@ -598,6 +637,26 @@ public class MainActivity extends Activity {
       }catch(Exception ignored){}
       final int count=sent;
       if(label!=null)runOnUiThread(()->label.setText("Sent "+command+" to "+count+"/"+targets.size()+" light(s)."));
+    }).start();
+  }
+  private void sendGoveeColor(ArrayList<String> targets,int rgb,TextView label){
+    if(targets.isEmpty()){label.setText("Find Govee lights first.");return;}
+    new Thread(()->{
+      int sent=0;
+      try(java.net.DatagramSocket socket=new java.net.DatagramSocket()){
+        JSONObject color=new JSONObject();
+        color.put("r",Color.red(rgb));color.put("g",Color.green(rgb));color.put("b",Color.blue(rgb));
+        JSONObject data=new JSONObject();data.put("color",color);data.put("colorTemInKelvin",0);
+        JSONObject msg=new JSONObject();msg.put("cmd","colorwc");msg.put("data",data);
+        JSONObject packetJson=new JSONObject();packetJson.put("msg",msg);
+        byte[] payload=packetJson.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        for(String ip:targets){
+          try{socket.send(new java.net.DatagramPacket(payload,payload.length,java.net.InetAddress.getByName(ip),4003));sent++;}
+          catch(Exception ignored){}
+        }
+      }catch(Exception ignored){}
+      final int count=sent;
+      runOnUiThread(()->label.setText("Color sent to "+count+"/"+targets.size()+" light(s). Check the actual color."));
     }).start();
   }
   private void stopGoveeStrobe(){
