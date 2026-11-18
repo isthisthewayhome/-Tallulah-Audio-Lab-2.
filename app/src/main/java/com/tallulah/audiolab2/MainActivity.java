@@ -54,6 +54,9 @@ public class MainActivity extends Activity {
   private int levelSessionId=-1;
   private int audioSensitivity=60;
   private int detectedAudioLevel=0;
+  private double detectedRawLevel=0;
+  private double reactiveBaseline=0;
+  private double reactivePeak=0;
   private boolean reactiveActive=false;
   private final ArrayList<String> reactiveIps=new ArrayList<>();
   private int reactiveDelay=350;
@@ -65,9 +68,15 @@ public class MainActivity extends Activity {
   private final Runnable reactiveTick=new Runnable(){public void run(){
     if(!reactiveActive)return;
     if(!levelTestActive||reactiveIps.isEmpty()){stopReactive();return;}
-    reactiveSmoothed=reactiveSmoothed*0.35+detectedAudioLevel*0.65;
-    int brightness=Math.max(1,Math.min(100,(int)Math.round(1+reactiveSmoothed*2.5)));
-    if(reactiveDiagnostic!=null)reactiveDiagnostic.setText("Audio level: "+detectedAudioLevel+"% • Requested brightness: "+brightness+"%");
+    // Adaptive audio range: avoid pinning brightness at 100% on consistently loud tracks.
+    double raw=detectedRawLevel;
+    reactiveBaseline=reactiveBaseline*0.98+raw*0.02;
+    reactivePeak=Math.max(raw,reactivePeak*0.97);
+    double range=Math.max(2.0,reactivePeak-reactiveBaseline);
+    double normalized=Math.max(0,Math.min(1,(raw-reactiveBaseline+range*0.2)/range));
+    reactiveSmoothed=reactiveSmoothed*0.45+normalized*0.55;
+    int brightness=Math.max(5,Math.min(100,(int)Math.round(5+reactiveSmoothed*95)));
+    if(reactiveDiagnostic!=null)reactiveDiagnostic.setText("Audio: "+detectedAudioLevel+"% • Raw: "+String.format(java.util.Locale.US,"%.1f",raw)+" • Brightness: "+brightness+"%");
     if(Math.abs(brightness-reactiveLast)>=2){
       reactiveLast=brightness;
       ArrayList<String> target=new ArrayList<>(reactiveIps);
@@ -101,7 +110,9 @@ public class MainActivity extends Activity {
         if(levelVisualizer.getWaveForm(wave)==android.media.audiofx.Visualizer.SUCCESS){
           double sum=0;
           for(byte sample:wave){int v=(sample&255)-128;sum+=v*v;}
-          int percent=Math.min(100,(int)Math.round(Math.sqrt(sum/wave.length)/128.0*180*(audioSensitivity/100.0)));
+          double rms=Math.sqrt(sum/wave.length)/128.0*100.0*(audioSensitivity/100.0);
+          detectedRawLevel=rms;
+          int percent=Math.min(100,(int)Math.round(rms));
           detectedAudioLevel=percent;
           if(audioLevelBar!=null)audioLevelBar.setProgress(percent);
           if(audioLevelStatus!=null)audioLevelStatus.setText("Audio detected • level "+percent+"%");
@@ -607,7 +618,7 @@ public class MainActivity extends Activity {
       if(!levelTestActive){lightStatus.setText("Start Audio Detection first.");return;}
       if(lightIps.size()!=4){lightStatus.setText("Find all four lights before starting this test. Found: "+lightIps.size());return;}
       stopGoveeFlow();stopGoveeStrobe();stopReactive();
-      reactiveIps.addAll(lightIps);reactiveSmoothed=detectedAudioLevel;reactiveActive=true;
+      reactiveIps.addAll(lightIps);reactiveSmoothed=0;reactiveBaseline=detectedRawLevel;reactivePeak=detectedRawLevel+5;reactiveActive=true;
       sendGoveeCommand(new ArrayList<>(reactiveIps),"turn",1,null);
       reactiveHandler.post(reactiveTick);
       lightStatus.setText("Reactive brightness running on all four lights.");
