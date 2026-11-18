@@ -56,7 +56,7 @@ public class MainActivity extends Activity {
     if(hismithCalibrationSetting>0&&hismithCalibrationBps>0&&hismithReportedSetting>=0){
       estimate=String.format(java.util.Locale.US,"Estimated %.2f BPS (proportional model, unverified)",hismithCalibrationBps*hismithReportedSetting/hismithCalibrationSetting);
     }
-    hismithDashboard.setText("HISMITH LIVE SPEED\\n"+setting+"\\n"+estimate+"\\nBluetooth reports a setting, not actual motion.");
+    hismithDashboard.setText("HISMITH LIVE SPEED\n"+setting+"\n"+estimate+"\nBluetooth reports a setting, not actual motion.");
   }
   private TextView hismithHistoryStatus;
   private final java.util.ArrayDeque<String> hismithHistory=new java.util.ArrayDeque<>();
@@ -515,7 +515,7 @@ public class MainActivity extends Activity {
     hismithBleResults=new LinearLayout(this);hismithBleResults.setOrientation(1);bluetoothDiagnostics.addView(hismithBleResults);
     hismithLiveStatus=text("Live monitor off. No notifications recorded.",13,false);bluetoothDiagnostics.addView(hismithLiveStatus);
     LinearLayout speedDashboard=collapsibleSection(bluetoothDiagnostics,"Live Speed Dashboard & Calibration",true);
-    hismithDashboard=text("HISMITH LIVE SPEED\\nWaiting for Bluetooth\\nRhythm frequency: not calibrated",18,true);
+    hismithDashboard=text("HISMITH LIVE SPEED\nWaiting for Bluetooth\nRhythm frequency: not calibrated",18,true);
     speedDashboard.addView(hismithDashboard);
     speedDashboard.addView(text("Calibrate only with a measured full-cycle rate (BPS) at the currently reported setting. The estimate assumes speed scales proportionally and may be inaccurate.",12,false));
     hismithMeasuredBpsInput=new EditText(this);
