@@ -278,7 +278,12 @@ public class MainActivity extends Activity {
     TextView eyebrow=text("Y O U R   P R I V A T E   S O U N D   S T U D I O",13,true);eyebrow.setTextColor(accent);root.addView(eyebrow);
     TextView heading=text("Tallulah Audio Lab",30,true);heading.setTextColor(Color.WHITE);root.addView(heading);
     TextView sub=text("Layer audio and design your own soundscapes.",13,false);sub.setTextColor(0xffc6a6cf);root.addView(sub);
-    LinearLayout masterSection=collapsibleSection(root,"Master transport",true);
+    LinearLayout audioStudio=collapsibleSection(root,"♫  Audio Studio",true);
+    LinearLayout soundGenerators=collapsibleSection(root,"♫  Sound Generators",false);
+    LinearLayout lightingGroup=collapsibleSection(root,"✦  Govee Lighting",false);
+    LinearLayout syncGroup=collapsibleSection(root,"◉  Audio Sync",false);
+    LinearLayout advancedGroup=collapsibleSection(root,"⚙  Advanced Settings",false);
+    LinearLayout masterSection=collapsibleSection(audioStudio,"Master transport",true);
     Button add=button("＋ Add audio");
     add.setOnClickListener(v->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("audio/*");i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);startActivityForResult(i,PICK_AUDIO);});
     LinearLayout controls=new LinearLayout(this);controls.setOrientation(LinearLayout.HORIZONTAL);masterSection.addView(controls);
@@ -301,11 +306,11 @@ public class MainActivity extends Activity {
     Button saveMix=button("⬇ Export WAV audio");masterSection.addView(saveMix);
     saveMix.setOnClickListener(v->saveEditedAudio());
     status=text("Ready to import audio",14,false);status.setTextColor(0xffcbb5d5);status.setPadding(0,16,0,14);root.addView(status);
-    LinearLayout audioSection=collapsibleSection(root,"Audio layers",false);
+    LinearLayout audioSection=collapsibleSection(audioStudio,"Audio layers",false);
     audioSection.addView(add);
     Button video=button("▣ Extract audio from video");audioSection.addView(video);video.setOnClickListener(v->status.setText("Video extraction is not available in this build yet."));
     trackList=new LinearLayout(this);trackList.setOrientation(1);audioSection.addView(trackList);
-    LinearLayout rhythmSection=collapsibleSection(root,"Hismith rhythm guide",false);
+    LinearLayout rhythmSection=collapsibleSection(soundGenerators,"Hismith rhythm guide",false);
     LinearLayout rhythmCard=new LinearLayout(this);rhythmCard.setOrientation(1);rhythmCard.setPadding(20,20,20,20);
     GradientDrawable rhythmBg=new GradientDrawable();rhythmBg.setColor(0xff1e1e32);rhythmBg.setCornerRadius(28);rhythmCard.setBackground(rhythmBg);rhythmSection.addView(rhythmCard);
     TextView rhythmHeading=text("HISMITH STROKE RHYTHM",18,true);rhythmHeading.setTextColor(0xffb497ff);rhythmCard.addView(rhythmHeading);
@@ -578,7 +583,7 @@ public class MainActivity extends Activity {
       }catch(Exception e){presetMessage.setText("Could not load preset.");}
     });
 
-    LinearLayout binauralSection=collapsibleSection(root,"Binaural beat generator",false);
+    LinearLayout binauralSection=collapsibleSection(soundGenerators,"Binaural beat generator",false);
     LinearLayout binCard=new LinearLayout(this);binCard.setOrientation(1);binCard.setPadding(20,20,20,20);
     GradientDrawable binShape=new GradientDrawable();binShape.setColor(0xff1e1e32);binShape.setCornerRadius(24);binCard.setBackground(binShape);binauralSection.addView(binCard);
     CheckBox stereoSwitch=new CheckBox(this);stereoSwitch.setText("Enable stereo tones");stereoSwitch.setTextColor(Color.WHITE);binCard.addView(stereoSwitch);
@@ -595,7 +600,7 @@ public class MainActivity extends Activity {
     TextView stereoVol=text("Tone volume • 25%",14,false);binCard.addView(stereoVol);
     SeekBar stereoSlider=new SeekBar(this);stereoSlider.setMax(100);stereoSlider.setProgress(25);binCard.addView(stereoSlider);
     stereoSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){stereoVolume=p;stereoVol.setText("Tone volume • "+p+"%");}public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}});
-    LinearLayout dreamSection=collapsibleSection(root,"Dream Sounds",false);
+    LinearLayout dreamSection=collapsibleSection(soundGenerators,"Dream Sounds",false);
     LinearLayout dreamCard=new LinearLayout(this);dreamCard.setOrientation(1);dreamCard.setPadding(20,20,20,20);
     GradientDrawable dreamShape=new GradientDrawable();dreamShape.setColor(0xff1e1e32);dreamShape.setCornerRadius(24);dreamCard.setBackground(dreamShape);dreamSection.addView(dreamCard);
     Spinner dreamPicker=new Spinner(this);dreamPicker.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Dark Drone","Ocean Drift","Airy Whisper","Soft Night Pulse"}));dreamCard.addView(dreamPicker);
@@ -606,7 +611,7 @@ public class MainActivity extends Activity {
     Button dreamButton=button("▶ Start Dream Sounds");dreamCard.addView(dreamButton);
     dreamButton.setOnClickListener(v->{atmosphereOn=!atmosphereOn;startAtmosphereIfNeeded();dreamButton.setText(atmosphereOn?"■ Stop Dream Sounds":"▶ Start Dream Sounds");});
     dreamCard.addView(text("Synthesized sound textures. Use stereo headphones for binaural tones.",12,false));
-    LinearLayout audioDetection=collapsibleSection(root,"Audio-Reactive Lighting • Detection Test",false);
+    LinearLayout audioDetection=collapsibleSection(syncGroup,"Audio Detection & Sensitivity",false);
     audioDetection.addView(text("Test the live sound level from an imported track. This version does not change the lights.",13,false));
     audioLevelBar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
     audioLevelBar.setMax(100);audioLevelBar.setProgress(0);audioLevelBar.setMinHeight(dp(45));audioDetection.addView(audioLevelBar);
@@ -642,7 +647,7 @@ public class MainActivity extends Activity {
       stopReactive();levelTestActive=false;levelHandler.removeCallbacks(levelMonitor);releaseLevelVisualizer();
       audioLevelBar.setProgress(0);audioLevelStatus.setText("Detection stopped");
     });
-    LinearLayout lights=collapsibleSection(root,"Govee Lighting",false);
+    LinearLayout lights=collapsibleSection(lightingGroup,"Lighting Controls",false);
     lights.addView(text("H801D • LAN discovery test. Keep phone on the same Wi-Fi as the lights.",13,false));
     TextView lightStatus=text("Not scanned yet",14,false);lights.addView(lightStatus);
     Spinner lightPicker=new Spinner(this);lights.addView(lightPicker);
@@ -650,7 +655,7 @@ public class MainActivity extends Activity {
     ArrayAdapter<String> lightAdapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,lightNames);
     lightPicker.setAdapter(lightAdapter);
     ArrayList<String> lightIps=new ArrayList<>();
-    LinearLayout reactiveSection=collapsibleSection(lights,"Audio-Reactive Brightness • Four-Light Test",false);
+    LinearLayout reactiveSection=collapsibleSection(syncGroup,"Audio-Reactive Effects",false);
     reactiveSection.addView(text("Start Audio Detection first. All four discovered lights will react together, regardless of the light selector.",13,false));
     reactiveSection.addView(text("Reaction speed • Smooth                         Responsive",13,false));
     SeekBar reactiveSpeed=new SeekBar(this);reactiveSpeed.setMax(4);reactiveSpeed.setProgress(2);
@@ -663,7 +668,7 @@ public class MainActivity extends Activity {
     });
     reactiveDiagnostic=text("Audio level: -- • Requested brightness: --",14,false);
     reactiveSection.addView(reactiveDiagnostic);
-    Button commandTest=button("TEST LIGHT COMMANDS • 10% / 100%");reactiveSection.addView(commandTest);
+    Button commandTest=button("TEST LIGHT COMMANDS • 10% / 100%");advancedGroup.addView(commandTest);
     commandTest.setOnClickListener(v->{
       if(lightIps.size()!=4){lightStatus.setText("Discover all four lights first.");return;}
       stopReactive();stopGoveeFlow();stopGoveeStrobe();
@@ -760,7 +765,9 @@ public class MainActivity extends Activity {
     lightButtons.addView(lightsOff,new LinearLayout.LayoutParams(0,dp(58),1));
     lightsOn.setOnClickListener(v->sendGoveePower(lightIps,lightPicker.getSelectedItemPosition(),true,lightStatus));
     lightsOff.setOnClickListener(v->sendGoveePower(lightIps,lightPicker.getSelectedItemPosition(),false,lightStatus));
-    Button emergencyAll=button("EMERGENCY • ALL ON • 1%");lights.addView(emergencyAll);
+    Button emergencyAll=button("EMERGENCY • ALL ON • 1%");
+    root.addView(emergencyAll,3);
+    emergencyAll.setContentDescription("Emergency all lights on. Stop lighting effects and set warm white to one percent brightness.");
     lights.addView(text("Requests 1000K warm white at 1% on all discovered lights. Actual color temperature depends on H801D firmware limits.",12,false));
     emergencyAll.setOnClickListener(v->{
       if(lightIps.isEmpty()){lightStatus.setText("Discover your lights first.");return;}
