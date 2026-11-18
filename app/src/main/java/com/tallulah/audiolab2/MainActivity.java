@@ -54,6 +54,12 @@ public class MainActivity extends Activity {
   private int audioSensitivity=60;
   private int detectedAudioLevel=0;
   private double detectedRawLevel=0;
+  private double detectedBassLevel=0;
+  private boolean bassPulseMode=false;
+  private double bassFloor=0;
+  private double bassPeak=1;
+  private int bassPulseStrength=75;
+  private long lastBassPulseMs=0;
   private double reactiveBaseline=0;
   private double reactivePeak=0;
   private boolean reactiveActive=false;
@@ -77,7 +83,18 @@ public class MainActivity extends Activity {
     double normalized=Math.max(0,Math.min(1,(raw-reactiveBaseline+range*0.2)/range));
     reactiveSmoothed=reactiveSmoothed*0.45+normalized*0.55;
     int brightness=Math.max(5,Math.min(100,(int)Math.round(5+reactiveSmoothed*95)));
-    if(reactiveDiagnostic!=null)reactiveDiagnostic.setText("Audio: "+detectedAudioLevel+"% • Raw: "+String.format(java.util.Locale.US,"%.1f",raw)+" • Target: "+brightness+"% • Last sent: "+reactiveLastRequested+"% • Commands: "+reactiveCommandCount);
+    if(bassPulseMode){
+      double bass=detectedBassLevel;
+      bassFloor=bassFloor*0.96+bass*0.04;
+      bassPeak=Math.max(bass,bassPeak*0.97);
+      double bassRange=Math.max(0.7,bassPeak-bassFloor);
+      double impact=Math.max(0,Math.min(1,(bass-bassFloor)/bassRange));
+      long now=android.os.SystemClock.uptimeMillis();
+      boolean hit=impact>0.58&&now-lastBassPulseMs>=Math.max(220,reactiveDelay);
+      if(hit)lastBassPulseMs=now;
+      brightness=hit?Math.min(100,20+bassPulseStrength):Math.max(5,Math.min(35,Math.round(8+(float)impact*20)));
+    }
+    if(reactiveDiagnostic!=null)reactiveDiagnostic.setText("Mode: "+(bassPulseMode?"Bass Pulse":"Brightness")+" • Audio: "+detectedAudioLevel+"% • Bass: "+String.format(java.util.Locale.US,"%.1f",detectedBassLevel)+" • Target: "+brightness+"% • Last sent: "+reactiveLastRequested+"% • Commands: "+reactiveCommandCount);
     if(Math.abs(brightness-reactiveLast)>=2){
       reactiveLast=brightness;
       reactiveLastRequested=brightness;
@@ -130,6 +147,7 @@ public class MainActivity extends Activity {
     // Combine each playing layer's RMS energy. Keep an uncapped reading
     // for adaptive lighting and a capped percentage for the visual meter.
     double combinedPower=0;
+    double combinedBassPower=0;
     int captured=0;
     for(android.media.audiofx.Visualizer viz:levelVisualizers.values()){
       try{
@@ -139,9 +157,20 @@ public class MainActivity extends Activity {
           for(byte sample:wave){double v=(sample&255)-128;power+=v*v;}
           combinedPower+=power/wave.length;
           captured++;
+          byte[] fft=new byte[viz.getCaptureSize()];
+          if(viz.getFft(fft)==android.media.audiofx.Visualizer.SUCCESS){
+            double hz=viz.getSamplingRate()/1000.0/fft.length;
+            int low=Math.max(1,(int)Math.ceil(45/hz));
+            int high=Math.min(fft.length/2-1,(int)Math.floor(220/hz));
+            for(int k=low;k<=high;k++){
+              double real=fft[k*2],imag=fft[k*2+1];
+              combinedBassPower+=(real*real+imag*imag)/(fft.length*fft.length);
+            }
+          }
         }
       }catch(Exception ignored){}
     }
+    detectedBassLevel=captured>0?Math.sqrt(combinedBassPower)*100*(audioSensitivity/100.0):0;
     detectedRawLevel=captured>0?Math.sqrt(combinedPower)/128.0*100.0*(audioSensitivity/100.0):0;
     detectedAudioLevel=Math.min(100,(int)Math.round(detectedRawLevel));
     if(audioLevelBar!=null)audioLevelBar.setProgress(detectedAudioLevel);
@@ -157,7 +186,7 @@ public class MainActivity extends Activity {
       try{viz.setEnabled(false);viz.release();}catch(Exception ignored){}
     }
     levelVisualizers.clear();
-    detectedRawLevel=0;detectedAudioLevel=0;
+    detectedRawLevel=0;detectedAudioLevel=0;detectedBassLevel=0;
   }
   private final Handler goveeFlowHandler=new Handler(Looper.getMainLooper());
   private Runnable goveeFlowTask=null;
@@ -646,16 +675,30 @@ public class MainActivity extends Activity {
       reactiveHandler.postDelayed(()->sendGoveeCommand(targets,"brightness",10,null),2200);
       reactiveHandler.postDelayed(()->lightStatus.setText("Manual brightness test complete. Did all four lights change?"),3300);
     });
+    reactiveSection.addView(text("Lighting response mode",14,true));
+    Spinner responseMode=new Spinner(this);
+    responseMode.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Smooth Brightness (existing)","Bass Pulse (new)"}));
+    reactiveSection.addView(responseMode);
+    reactiveSection.addView(text("Bass pulse strength",13,false));
+    SeekBar pulseStrength=new SeekBar(this);pulseStrength.setMax(80);pulseStrength.setProgress(55);
+    pulseStrength.setMinHeight(dp(64));reactiveSection.addView(pulseStrength);
+    pulseStrength.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar bar,int p,boolean user){bassPulseStrength=p+20;}
+      public void onStartTrackingTouch(SeekBar bar){}
+      public void onStopTrackingTouch(SeekBar bar){}
+    });
     Button reactiveStart=button("Start reactive brightness");reactiveSection.addView(reactiveStart);
     Button reactiveStop=button("■ Stop reactive lighting");reactiveSection.addView(reactiveStop);
     reactiveStart.setOnClickListener(v->{
       if(!levelTestActive){lightStatus.setText("Start Audio Detection first.");return;}
       if(lightIps.size()!=4){lightStatus.setText("Find all four lights before starting this test. Found: "+lightIps.size());return;}
       stopGoveeFlow();stopGoveeStrobe();stopReactive();
+      bassPulseMode=responseMode.getSelectedItemPosition()==1;
+      bassFloor=detectedBassLevel;bassPeak=detectedBassLevel+1;lastBassPulseMs=0;
       reactiveIps.addAll(lightIps);reactiveCommandCount=0;reactiveLastRequested=-1;reactiveSmoothed=0;reactiveBaseline=detectedRawLevel;reactivePeak=detectedRawLevel+5;reactiveActive=true;
       sendGoveeCommand(new ArrayList<>(reactiveIps),"turn",1,null);
       reactiveHandler.post(reactiveTick);
-      lightStatus.setText("Reactive brightness running on all four lights.");
+      lightStatus.setText((bassPulseMode?"Bass Pulse":"Reactive brightness")+" running on all four lights.");
     });
     reactiveStop.setOnClickListener(v->{
       ArrayList<String> previous=new ArrayList<>(reactiveIps);
