@@ -47,6 +47,12 @@ public class MainActivity extends Activity {
   private void positionMix(int ms){mixClockPositionMs=Math.max(0,Math.min(getMixDuration(),ms));if(playing)mixClockStartedAt=android.os.SystemClock.elapsedRealtime()-mixClockPositionMs;for(Track t:tracks){try{t.player.pause();int local=mixClockPositionMs-t.startAtMs;t.player.seekTo(t.trimStartMs+Math.max(0,Math.min(local,t.trimEndMs-t.trimStartMs)));t.scheduledActive=false;}catch(Exception ignored){}}updateVolumes();}
   private final Handler clipHandler=new Handler(Looper.getMainLooper());
   private final Runnable clipMonitor=new Runnable(){public void run(){if(playing){int now=mixPosition();for(Track t:tracks){try{int local=now-t.startAtMs;if(local>=0&&local<t.trimEndMs-t.trimStartMs&&!t.scheduledActive&&(!hasSolo()||t.solo)){t.player.seekTo(t.trimStartMs+local);updateVolumes();t.player.start();t.scheduledActive=true;}if(local>=t.trimEndMs-t.trimStartMs&&t.scheduledActive&&!t.loop.isChecked()){t.player.pause();t.scheduledActive=false;}}catch(Exception ignored){}}if(now>=getMixDuration()){playing=false;mixClockPositionMs=getMixDuration();}}for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}updateVolumes();updateMasterTimeline();updateTrackProgress();clipHandler.postDelayed(this,80);}};
+  private final Handler goveeStrobeHandler=new Handler(Looper.getMainLooper());
+  private Runnable goveeStrobeTask=null;
+  private boolean goveeStrobeActive=false;
+  private int goveeStrobeIntervalMs=1000;
+  private int goveeStrobeBrightness=50;
+  private ArrayList<String> goveeStrobeTargets=new ArrayList<>();
   private final Handler rhythmHandler = new Handler(Looper.getMainLooper());
   private AudioTrack rhythmTone;
   private boolean rhythmEnabled=false,strokeSync=false;
@@ -510,8 +516,86 @@ public class MainActivity extends Activity {
     lightButtons.addView(lightsOff,new LinearLayout.LayoutParams(0,dp(58),1));
     lightsOn.setOnClickListener(v->sendGoveePower(lightIps,lightPicker.getSelectedItemPosition(),true,lightStatus));
     lightsOff.setOnClickListener(v->sendGoveePower(lightIps,lightPicker.getSelectedItemPosition(),false,lightStatus));
-    lights.addView(text("First test: discover four devices, then turn one light on/off. Audio sync and colors come later.",12,false));
+    TextView brightnessText=text("Brightness • 50%",14,true);lights.addView(brightnessText);
+    SeekBar brightnessBar=new SeekBar(this);brightnessBar.setMax(99);brightnessBar.setProgress(49);brightnessBar.setMinHeight(dp(64));lights.addView(brightnessBar);
+    brightnessBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar bar,int progress,boolean user){
+        int value=progress+1;brightnessText.setText("Brightness • "+value+"%");
+        if(user)goveeStrobeBrightness=value;
+      }
+      public void onStartTrackingTouch(SeekBar bar){}
+      public void onStopTrackingTouch(SeekBar bar){
+        int value=bar.getProgress()+1;
+        if(goveeStrobeActive){lightStatus.setText("Stop strobe before changing brightness.");return;}
+        sendGoveeCommand(selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition()),"brightness",value,lightStatus);
+      }
+    });
+    TextView strobeTitle=text("Strobe • current light color",16,true);lights.addView(strobeTitle);
+    TextView strobeSpeed=text("Flash cycle • 1.0 second",13,false);lights.addView(strobeSpeed);
+    SeekBar strobeSlider=new SeekBar(this);strobeSlider.setMax(3);strobeSlider.setProgress(1);strobeSlider.setMinHeight(dp(64));lights.addView(strobeSlider);
+    int[] strobeIntervals={2000,1000,750,500};
+    strobeSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar bar,int p,boolean user){
+        goveeStrobeIntervalMs=strobeIntervals[p];
+        strobeSpeed.setText(String.format(java.util.Locale.US,"Flash cycle • %.2f seconds",goveeStrobeIntervalMs/1000.0));
+      }
+      public void onStartTrackingTouch(SeekBar bar){}
+      public void onStopTrackingTouch(SeekBar bar){}
+    });
+    Button strobeStart=button("Start strobe");lights.addView(strobeStart);
+    Button strobeStop=button("Stop strobe • steady ON");lights.addView(strobeStop);
+    strobeStart.setOnClickListener(v->{
+      if(goveeStrobeActive){lightStatus.setText("Strobe is already running.");return;}
+      ArrayList<String> targets=selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition());
+      if(targets.isEmpty()){lightStatus.setText("Discover the lights first.");return;}
+      goveeStrobeTargets=new ArrayList<>(targets);
+      goveeStrobeBrightness=brightnessBar.getProgress()+1;
+      goveeStrobeActive=true;
+      final boolean[] lit={true};
+      goveeStrobeTask=new Runnable(){public void run(){
+        if(!goveeStrobeActive)return;
+        lit[0]=!lit[0];
+        sendGoveeCommand(goveeStrobeTargets,"turn",lit[0]?1:0,null);
+        goveeStrobeHandler.postDelayed(this,Math.max(250,goveeStrobeIntervalMs/2));
+      }};
+      sendGoveeCommand(targets,"brightness",goveeStrobeBrightness,null);
+      goveeStrobeHandler.postDelayed(goveeStrobeTask,Math.max(250,goveeStrobeIntervalMs/2));
+      lightStatus.setText("Strobe running • tap Stop for steady light");
+    });
+    strobeStop.setOnClickListener(v->{stopGoveeStrobe();lightStatus.setText("Strobe stopped • lights set to steady ON");});
+    lights.addView(text("Flashing lights may trigger seizures or migraines. Stop immediately if uncomfortable. No automatic color changes.",12,false));
     TextView foot=text("Govee LAN controls are in testing. Keep using Govee Home if discovery fails.",13,false);foot.setTextColor(0xffb7a5be);foot.setPadding(0,28,0,0);root.addView(foot);
+  }
+  private ArrayList<String> selectedGoveeTargets(ArrayList<String> ips,int selected){
+    ArrayList<String> targets=new ArrayList<>();
+    if(selected==0)targets.addAll(ips);
+    else if(selected>0&&selected<=ips.size())targets.add(ips.get(selected-1));
+    return targets;
+  }
+  private void sendGoveeCommand(ArrayList<String> targets,String command,int value,TextView label){
+    if(targets.isEmpty()){if(label!=null)label.setText("Scan for lights first.");return;}
+    new Thread(()->{
+      int sent=0;
+      try(java.net.DatagramSocket socket=new java.net.DatagramSocket()){
+        JSONObject data=new JSONObject();data.put("value",value);
+        JSONObject msg=new JSONObject();msg.put("cmd",command);msg.put("data",data);
+        JSONObject packetJson=new JSONObject();packetJson.put("msg",msg);
+        byte[] payload=packetJson.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        for(String ip:targets){try{
+          socket.send(new java.net.DatagramPacket(payload,payload.length,java.net.InetAddress.getByName(ip),4003));sent++;
+        }catch(Exception ignored){}}
+      }catch(Exception ignored){}
+      final int count=sent;
+      if(label!=null)runOnUiThread(()->label.setText("Sent "+command+" to "+count+"/"+targets.size()+" light(s)."));
+    }).start();
+  }
+  private void stopGoveeStrobe(){
+    goveeStrobeActive=false;
+    if(goveeStrobeTask!=null)goveeStrobeHandler.removeCallbacks(goveeStrobeTask);
+    if(!goveeStrobeTargets.isEmpty()){
+      sendGoveeCommand(new ArrayList<>(goveeStrobeTargets),"turn",1,null);
+      goveeStrobeTargets.clear();
+    }
   }
   private void sendGoveePower(ArrayList<String> ips,int selected,boolean on,TextView label){
     ArrayList<String> targets=new ArrayList<>();
