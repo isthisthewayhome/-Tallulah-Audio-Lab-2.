@@ -568,16 +568,33 @@ public class MainActivity extends Activity {
       int rgb=Color.HSVToColor(new float[]{hueBar.getProgress(),saturationBar.getProgress()/100f,1f});
       sendGoveeColor(selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition()),rgb,lightStatus);
     });
-    LinearLayout presetColors=new LinearLayout(this);presetColors.setOrientation(LinearLayout.VERTICAL);lights.addView(presetColors);
+    LinearLayout presetColors=new LinearLayout(this);
+    presetColors.setOrientation(LinearLayout.HORIZONTAL);
+    presetColors.setGravity(android.view.Gravity.CENTER_VERTICAL);
+    presetColors.setPadding(0,dp(8),0,dp(8));
+    lights.addView(presetColors);
     String[] colorNames={"Deep Red","Plum","Purple","Ocean Blue","Turquoise"};
     int[] colorValues={0xffAA0022,0xff76235D,0xff7722CC,0xff0033CC,0xff00B5AA};
     for(int n=0;n<colorNames.length;n++){
       final int rgb=colorValues[n];
-      Button preset=button(colorNames[n]);presetColors.addView(preset);
-      preset.setOnClickListener(v->{
+      final String colorName=colorNames[n];
+      View swatch=new View(this);
+      GradientDrawable swatchBackground=new GradientDrawable();
+      swatchBackground.setColor(rgb);
+      swatchBackground.setCornerRadius(dp(9));
+      swatchBackground.setStroke(dp(2),0xffD6B9E9);
+      swatch.setBackground(swatchBackground);
+      swatch.setContentDescription(colorName);
+      swatch.setClickable(true);
+      swatch.setFocusable(true);
+      LinearLayout.LayoutParams swatchParams=new LinearLayout.LayoutParams(0,dp(54),1);
+      swatchParams.setMargins(dp(3),0,dp(3),0);
+      presetColors.addView(swatch,swatchParams);
+      swatch.setOnClickListener(v->{
         float[] hsv=new float[3];Color.colorToHSV(rgb,hsv);
         hueBar.setProgress(Math.round(hsv[0]));saturationBar.setProgress(Math.round(hsv[1]*100));
         if(goveeStrobeActive){lightStatus.setText("Stop strobe/pulse before changing color.");return;}
+        stopGoveeFlow();
         sendGoveeColor(selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition()),rgb,lightStatus);
       });
     }
