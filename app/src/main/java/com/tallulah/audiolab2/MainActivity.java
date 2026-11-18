@@ -59,13 +59,16 @@ public class MainActivity extends Activity {
   private int reactiveDelay=350;
   private double reactiveSmoothed=0;
   private int reactiveLast=-1;
+  private TextView reactiveDiagnostic=null;
+  private long reactiveLastSentAt=0;
   private final Handler reactiveHandler=new Handler(Looper.getMainLooper());
   private final Runnable reactiveTick=new Runnable(){public void run(){
     if(!reactiveActive)return;
     if(!levelTestActive||reactiveIps.isEmpty()){stopReactive();return;}
-    reactiveSmoothed=reactiveSmoothed*0.65+detectedAudioLevel*0.35;
-    int brightness=Math.max(1,Math.min(100,(int)Math.round(3+reactiveSmoothed*0.97)));
-    if(Math.abs(brightness-reactiveLast)>=3){
+    reactiveSmoothed=reactiveSmoothed*0.35+detectedAudioLevel*0.65;
+    int brightness=Math.max(1,Math.min(100,(int)Math.round(1+reactiveSmoothed*2.5)));
+    if(reactiveDiagnostic!=null)reactiveDiagnostic.setText("Audio level: "+detectedAudioLevel+"% • Requested brightness: "+brightness+"%");
+    if(Math.abs(brightness-reactiveLast)>=2){
       reactiveLast=brightness;
       ArrayList<String> target=new ArrayList<>(reactiveIps);
       sendGoveeCommand(target,"brightness",brightness,null);
@@ -583,6 +586,20 @@ public class MainActivity extends Activity {
       public void onProgressChanged(SeekBar bar,int p,boolean user){reactiveDelay=reactiveIntervals[p];}
       public void onStartTrackingTouch(SeekBar bar){}
       public void onStopTrackingTouch(SeekBar bar){}
+    });
+    reactiveDiagnostic=text("Audio level: -- • Requested brightness: --",14,false);
+    reactiveSection.addView(reactiveDiagnostic);
+    Button commandTest=button("TEST LIGHT COMMANDS • 10% / 100%");reactiveSection.addView(commandTest);
+    commandTest.setOnClickListener(v->{
+      if(lightIps.size()!=4){lightStatus.setText("Discover all four lights first.");return;}
+      stopReactive();stopGoveeFlow();stopGoveeStrobe();
+      ArrayList<String> targets=new ArrayList<>(lightIps);
+      sendGoveeCommand(targets,"turn",1,null);
+      sendGoveeCommand(targets,"brightness",10,null);
+      reactiveDiagnostic.setText("Manual test: 10% → 100% → 10% (three seconds)");
+      reactiveHandler.postDelayed(()->sendGoveeCommand(targets,"brightness",100,null),1100);
+      reactiveHandler.postDelayed(()->sendGoveeCommand(targets,"brightness",10,null),2200);
+      reactiveHandler.postDelayed(()->lightStatus.setText("Manual brightness test complete. Did all four lights change?"),3300);
     });
     Button reactiveStart=button("Start reactive brightness");reactiveSection.addView(reactiveStart);
     Button reactiveStop=button("■ Stop reactive lighting");reactiveSection.addView(reactiveStop);
