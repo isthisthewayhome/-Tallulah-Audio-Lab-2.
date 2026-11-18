@@ -42,6 +42,52 @@ public class MainActivity extends Activity {
   private final java.util.HashSet<String> hismithSeen=new java.util.HashSet<>();
   private final Handler hismithBleHandler=new Handler(Looper.getMainLooper());
   private boolean hismithScanning=false;
+  private TextView hismithLiveStatus;
+  private final java.util.ArrayDeque<android.bluetooth.BluetoothGattCharacteristic> hismithNotifyQueue=new java.util.ArrayDeque<>();
+  private boolean hismithMonitorActive=false;
+  private int hismithPacketCount=0;
+  private String hismithLastPacket="None";
+  private static final java.util.UUID BLE_CCCD=java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
+  private String bleHex(byte[] data){
+    if(data==null)return "(empty)";
+    StringBuilder b=new StringBuilder();
+    for(int i=0;i<Math.min(data.length,48);i++)b.append(String.format(java.util.Locale.US,"%02X ",data[i]&255));
+    return b.toString().trim()+(data.length>48?" …":"");
+  }
+  private void nextHismithSubscription(android.bluetooth.BluetoothGatt g){
+    if(!hismithMonitorActive||g!=hismithGatt)return;
+    android.bluetooth.BluetoothGattCharacteristic c=hismithNotifyQueue.poll();
+    if(c==null){runOnUiThread(()->hismithLiveStatus.setText("Monitoring • "+hismithPacketCount+" notifications • Last: "+hismithLastPacket));return;}
+    try{
+      android.bluetooth.BluetoothGattDescriptor d=c.getDescriptor(BLE_CCCD);
+      if(d==null||!g.setCharacteristicNotification(c,true)){nextHismithSubscription(g);return;}
+      byte[] enable=((c.getProperties()&android.bluetooth.BluetoothGattCharacteristic.PROPERTY_NOTIFY)!=0)?
+        android.bluetooth.BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE:android.bluetooth.BluetoothGattDescriptor.ENABLE_INDICATION_VALUE;
+      if(android.os.Build.VERSION.SDK_INT>=33){
+        if(g.writeDescriptor(d,enable)!=android.bluetooth.BluetoothStatusCodes.SUCCESS)nextHismithSubscription(g);
+      }else{
+        d.setValue(enable);
+        if(!g.writeDescriptor(d))nextHismithSubscription(g);
+      }
+    }catch(Exception e){nextHismithSubscription(g);}
+  }
+  private void startHismithMonitor(){
+    if(hismithGatt==null||hismithGatt.getServices().isEmpty()){
+      hismithLiveStatus.setText("Connect to HISMITH and discover services first.");return;
+    }
+    hismithNotifyQueue.clear();hismithPacketCount=0;hismithLastPacket="None";hismithMonitorActive=true;
+    for(android.bluetooth.BluetoothGattService service:hismithGatt.getServices()){
+      String serviceId=service.getUuid().toString();
+      if(!serviceId.startsWith("0000ffe0-")&&!serviceId.startsWith("0000ffc0-"))continue;
+      for(android.bluetooth.BluetoothGattCharacteristic c:service.getCharacteristics()){
+        int p=c.getProperties();
+        if((p&(android.bluetooth.BluetoothGattCharacteristic.PROPERTY_NOTIFY|android.bluetooth.BluetoothGattCharacteristic.PROPERTY_INDICATE))!=0&&c.getDescriptor(BLE_CCCD)!=null)hismithNotifyQueue.add(c);
+      }
+    }
+    hismithLiveStatus.setText("Subscribing to "+hismithNotifyQueue.size()+" notification characteristic(s). No motor commands.");
+    nextHismithSubscription(hismithGatt);
+  }
+
   private boolean hismithPermissionOk(){
     if(android.os.Build.VERSION.SDK_INT>=31)return checkSelfPermission("android.permission.BLUETOOTH_SCAN")==android.content.pm.PackageManager.PERMISSION_GRANTED&&checkSelfPermission("android.permission.BLUETOOTH_CONNECT")==android.content.pm.PackageManager.PERMISSION_GRANTED;
     return checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==android.content.pm.PackageManager.PERMISSION_GRANTED;
@@ -53,6 +99,7 @@ public class MainActivity extends Activity {
     hismithScanning=false;
   }
   private void closeHismithGatt(){
+    hismithMonitorActive=false;hismithNotifyQueue.clear();
     if(hismithGatt!=null){try{hismithGatt.disconnect();hismithGatt.close();}catch(Exception ignored){}hismithGatt=null;}
   }
   private void startHismithScan(){
@@ -104,6 +151,17 @@ public class MainActivity extends Activity {
           }else if(state==android.bluetooth.BluetoothProfile.STATE_DISCONNECTED){
             runOnUiThread(()->hismithBleStatus.setText("Disconnected from "+name+" (status "+status+")."));
           }
+        }
+        @Override public void onDescriptorWrite(android.bluetooth.BluetoothGatt g,android.bluetooth.BluetoothGattDescriptor d,int status){
+          nextHismithSubscription(g);
+        }
+        @Override public void onCharacteristicChanged(android.bluetooth.BluetoothGatt g,android.bluetooth.BluetoothGattCharacteristic c,byte[] value){
+          hismithPacketCount++;
+          hismithLastPacket=c.getUuid().toString().substring(4,8)+" : "+bleHex(value);
+          runOnUiThread(()->{if(hismithLiveStatus!=null)hismithLiveStatus.setText("Notifications: "+hismithPacketCount+"\nLast: "+hismithLastPacket);});
+        }
+        @Override public void onCharacteristicChanged(android.bluetooth.BluetoothGatt g,android.bluetooth.BluetoothGattCharacteristic c){
+          onCharacteristicChanged(g,c,c.getValue());
         }
         @Override public void onServicesDiscovered(android.bluetooth.BluetoothGatt g,int status){
           runOnUiThread(()->{
@@ -413,6 +471,12 @@ public class MainActivity extends Activity {
     Button bleDisconnectButton=button("Disconnect Bluetooth diagnostic");bluetoothDiagnostics.addView(bleDisconnectButton);
     bleDisconnectButton.setOnClickListener(v->{stopHismithScan();closeHismithGatt();hismithBleStatus.setText("Bluetooth diagnostic disconnected.");});
     hismithBleResults=new LinearLayout(this);hismithBleResults.setOrientation(1);bluetoothDiagnostics.addView(hismithBleResults);
+    hismithLiveStatus=text("Live monitor off. No notifications recorded.",13,false);bluetoothDiagnostics.addView(hismithLiveStatus);
+    Button bleLive=button("Start read-only live monitor");bluetoothDiagnostics.addView(bleLive);
+    bleLive.setOnClickListener(v->startHismithMonitor());
+    Button bleStopLive=button("Stop live monitor and disconnect");bluetoothDiagnostics.addView(bleStopLive);
+    bleStopLive.setOnClickListener(v->{closeHismithGatt();hismithLiveStatus.setText("Monitor stopped and disconnected.");});
+
 
     rhythmStatus=text("Rhythm guide stopped",14,false);rhythmStatus.setPadding(0,14,0,8);rhythmCard.addView(rhythmStatus);
     Button rhythmToggle=button("▶ Start rhythm guide");rhythmCard.addView(rhythmToggle);
