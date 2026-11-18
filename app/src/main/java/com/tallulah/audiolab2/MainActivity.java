@@ -44,6 +44,20 @@ public class MainActivity extends Activity {
   private boolean hismithScanning=false;
   private TextView hismithLiveStatus;
   private TextView hismithCandidateStatus;
+  private TextView hismithDashboard;
+  private EditText hismithMeasuredBpsInput;
+  private int hismithReportedSetting=-1;
+  private int hismithCalibrationSetting=-1;
+  private double hismithCalibrationBps=0;
+  private void renderHismithDashboard(){
+    if(hismithDashboard==null)return;
+    String setting=hismithReportedSetting<0?"Waiting for Bluetooth":"Setting "+hismithReportedSetting+" / 100";
+    String estimate="Rhythm frequency: not calibrated";
+    if(hismithCalibrationSetting>0&&hismithCalibrationBps>0&&hismithReportedSetting>=0){
+      estimate=String.format(java.util.Locale.US,"Estimated %.2f BPS (proportional model, unverified)",hismithCalibrationBps*hismithReportedSetting/hismithCalibrationSetting);
+    }
+    hismithDashboard.setText("HISMITH LIVE SPEED\\n"+setting+"\\n"+estimate+"\\nBluetooth reports a setting, not actual motion.");
+  }
   private TextView hismithHistoryStatus;
   private final java.util.ArrayDeque<String> hismithHistory=new java.util.ArrayDeque<>();
   private void renderHismithHistory(){
@@ -85,6 +99,7 @@ public class MainActivity extends Activity {
       hismithLiveStatus.setText("Connect to HISMITH and discover services first.");return;
     }
     hismithNotifyQueue.clear();hismithPacketCount=0;hismithLastPacket="None";hismithMonitorActive=true;
+    hismithReportedSetting=-1;renderHismithDashboard();
     hismithHistory.clear();renderHismithHistory();
     if(hismithCandidateStatus!=null)hismithCandidateStatus.setText("Candidate speed: waiting for AA 03 packets (unverified)");
     for(android.bluetooth.BluetoothGattService service:hismithGatt.getServices()){
@@ -181,6 +196,7 @@ public class MainActivity extends Activity {
             renderHismithHistory();
             if(hismithCandidateStatus!=null&&packet.length==4&&(packet[0]&255)==0xAA&&(packet[1]&255)==0x03){
               int candidate=packet[2]&255;
+              if(candidate<=100){hismithReportedSetting=candidate;renderHismithDashboard();}
               boolean matching=((candidate+3)&255)==(packet[3]&255);
               hismithCandidateStatus.setText("Candidate value: "+candidate+" / 100? (UNVERIFIED) • final-byte pattern "+(matching?"matches":"differs")+". Not measured thrust speed.");
             }
@@ -498,6 +514,26 @@ public class MainActivity extends Activity {
     bleDisconnectButton.setOnClickListener(v->{stopHismithScan();closeHismithGatt();hismithBleStatus.setText("Bluetooth diagnostic disconnected.");});
     hismithBleResults=new LinearLayout(this);hismithBleResults.setOrientation(1);bluetoothDiagnostics.addView(hismithBleResults);
     hismithLiveStatus=text("Live monitor off. No notifications recorded.",13,false);bluetoothDiagnostics.addView(hismithLiveStatus);
+    LinearLayout speedDashboard=collapsibleSection(bluetoothDiagnostics,"Live Speed Dashboard & Calibration",true);
+    hismithDashboard=text("HISMITH LIVE SPEED\\nWaiting for Bluetooth\\nRhythm frequency: not calibrated",18,true);
+    speedDashboard.addView(hismithDashboard);
+    speedDashboard.addView(text("Calibrate only with a measured full-cycle rate (BPS) at the currently reported setting. The estimate assumes speed scales proportionally and may be inaccurate.",12,false));
+    hismithMeasuredBpsInput=new EditText(this);
+    hismithMeasuredBpsInput.setHint("Measured cycles per second (e.g. 1.5)");
+    hismithMeasuredBpsInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+    speedDashboard.addView(hismithMeasuredBpsInput);
+    Button calibrateSpeed=button("Save calibration at current setting");speedDashboard.addView(calibrateSpeed);
+    calibrateSpeed.setOnClickListener(v->{
+      if(hismithReportedSetting<=0){Toast.makeText(this,"Connect and select a nonzero speed first.",Toast.LENGTH_SHORT).show();return;}
+      try{
+        double value=Double.parseDouble(hismithMeasuredBpsInput.getText().toString().trim());
+        if(!Double.isFinite(value)||value<=0||value>20)throw new NumberFormatException();
+        hismithCalibrationSetting=hismithReportedSetting;hismithCalibrationBps=value;
+        renderHismithDashboard();
+      }catch(NumberFormatException e){Toast.makeText(this,"Enter a valid measured BPS (0–20).",Toast.LENGTH_SHORT).show();}
+    });
+    Button clearCalibration=button("Clear calibration");speedDashboard.addView(clearCalibration);
+    clearCalibration.setOnClickListener(v->{hismithCalibrationSetting=-1;hismithCalibrationBps=0;renderHismithDashboard();});
     hismithCandidateStatus=text("Candidate speed: waiting for AA 03 packets (unverified)",15,true);bluetoothDiagnostics.addView(hismithCandidateStatus);
     bluetoothDiagnostics.addView(text("Diagnostic only. Candidate byte is NOT verified motor speed. Compare with the original controller; keep the physical stop accessible.",12,false));
     hismithHistoryStatus=text("Recent BLE messages: none",12,false);bluetoothDiagnostics.addView(hismithHistoryStatus);
