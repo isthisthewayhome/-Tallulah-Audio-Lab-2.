@@ -47,11 +47,10 @@ public class MainActivity extends Activity {
   private void positionMix(int ms){mixClockPositionMs=Math.max(0,Math.min(getMixDuration(),ms));if(playing)mixClockStartedAt=android.os.SystemClock.elapsedRealtime()-mixClockPositionMs;for(Track t:tracks){try{t.player.pause();int local=mixClockPositionMs-t.startAtMs;t.player.seekTo(t.trimStartMs+Math.max(0,Math.min(local,t.trimEndMs-t.trimStartMs)));t.scheduledActive=false;}catch(Exception ignored){}}updateVolumes();}
   private final Handler clipHandler=new Handler(Looper.getMainLooper());
   private final Runnable clipMonitor=new Runnable(){public void run(){if(playing){int now=mixPosition();for(Track t:tracks){try{int local=now-t.startAtMs;if(local>=0&&local<t.trimEndMs-t.trimStartMs&&!t.scheduledActive&&(!hasSolo()||t.solo)){t.player.seekTo(t.trimStartMs+local);updateVolumes();t.player.start();t.scheduledActive=true;}if(local>=t.trimEndMs-t.trimStartMs&&t.scheduledActive&&!t.loop.isChecked()){t.player.pause();t.scheduledActive=false;}}catch(Exception ignored){}}if(now>=getMixDuration()){playing=false;mixClockPositionMs=getMixDuration();}}for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}updateVolumes();updateMasterTimeline();updateTrackProgress();clipHandler.postDelayed(this,80);}};
-  private android.media.audiofx.Visualizer levelVisualizer=null;
+  private final java.util.HashMap<Integer,android.media.audiofx.Visualizer> levelVisualizers=new java.util.HashMap<>();
   private boolean levelTestActive=false;
   private ProgressBar audioLevelBar=null;
   private TextView audioLevelStatus=null;
-  private int levelSessionId=-1;
   private int audioSensitivity=60;
   private int detectedAudioLevel=0;
   private double detectedRawLevel=0;
@@ -92,38 +91,69 @@ public class MainActivity extends Activity {
   private final Handler levelHandler=new Handler(Looper.getMainLooper());
   private final Runnable levelMonitor=new Runnable(){public void run(){
     if(!levelTestActive)return;
-    int session=-1;
-    for(Track t:tracks){try{if(t.player.isPlaying()){session=t.player.getAudioSessionId();break;}}catch(Exception ignored){}}
-    if(session!=levelSessionId){
-      releaseLevelVisualizer();
-      if(session>0&&android.os.Build.VERSION.SDK_INT>=23&&checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)==android.content.pm.PackageManager.PERMISSION_GRANTED){
-        try{
-          levelVisualizer=new android.media.audiofx.Visualizer(session);
-          levelVisualizer.setCaptureSize(android.media.audiofx.Visualizer.getCaptureSizeRange()[0]);
-          levelVisualizer.setEnabled(true);levelSessionId=session;
-        }catch(Exception e){releaseLevelVisualizer();if(audioLevelStatus!=null)audioLevelStatus.setText("Audio capture unavailable: "+e.getClass().getSimpleName());}
-      }
-    }
-    if(levelVisualizer!=null){
+    java.util.HashSet<Integer> activeSessions=new java.util.HashSet<>();
+    for(Track t:tracks){
       try{
-        byte[] wave=new byte[levelVisualizer.getCaptureSize()];
-        if(levelVisualizer.getWaveForm(wave)==android.media.audiofx.Visualizer.SUCCESS){
-          double sum=0;
-          for(byte sample:wave){int v=(sample&255)-128;sum+=v*v;}
-          double rms=Math.sqrt(sum/wave.length)/128.0*100.0*(audioSensitivity/100.0);
-          detectedRawLevel=rms;
-          int percent=Math.min(100,(int)Math.round(rms));
-          detectedAudioLevel=percent;
-          if(audioLevelBar!=null)audioLevelBar.setProgress(percent);
-          if(audioLevelStatus!=null)audioLevelStatus.setText("Audio detected • level "+percent+"%");
+        if(t.player!=null&&t.player.isPlaying()){
+          int session=t.player.getAudioSessionId();
+          if(session>0)activeSessions.add(session);
         }
       }catch(Exception ignored){}
-    }else if(audioLevelStatus!=null&&session<1)audioLevelStatus.setText("Play an imported audio track to test detection.");
+    }
+    // Remove visualizers for tracks that stopped, were replaced or were removed.
+    for(Integer old:new java.util.ArrayList<>(levelVisualizers.keySet())){
+      if(!activeSessions.contains(old)){
+        android.media.audiofx.Visualizer viz=levelVisualizers.remove(old);
+        try{viz.setEnabled(false);viz.release();}catch(Exception ignored){}
+      }
+    }
+    boolean permissionOk=android.os.Build.VERSION.SDK_INT>=23&&
+      checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)==android.content.pm.PackageManager.PERMISSION_GRANTED;
+    if(permissionOk){
+      for(Integer session:activeSessions){
+        if(levelVisualizers.containsKey(session))continue;
+        android.media.audiofx.Visualizer viz=null;
+        try{
+          viz=new android.media.audiofx.Visualizer(session);
+          viz.setCaptureSize(android.media.audiofx.Visualizer.getCaptureSizeRange()[0]);
+          viz.setEnabled(true);
+          levelVisualizers.put(session,viz);
+        }catch(Exception e){
+          if(viz!=null)try{viz.release();}catch(Exception ignored){}
+        }
+      }
+    }
+    // Combine each playing layer's RMS energy. Keep an uncapped reading
+    // for adaptive lighting and a capped percentage for the visual meter.
+    double combinedPower=0;
+    int captured=0;
+    for(android.media.audiofx.Visualizer viz:levelVisualizers.values()){
+      try{
+        byte[] wave=new byte[viz.getCaptureSize()];
+        if(viz.getWaveForm(wave)==android.media.audiofx.Visualizer.SUCCESS&&wave.length>0){
+          double power=0;
+          for(byte sample:wave){double v=(sample&255)-128;power+=v*v;}
+          combinedPower+=power/wave.length;
+          captured++;
+        }
+      }catch(Exception ignored){}
+    }
+    detectedRawLevel=captured>0?Math.sqrt(combinedPower)/128.0*100.0*(audioSensitivity/100.0):0;
+    detectedAudioLevel=Math.min(100,(int)Math.round(detectedRawLevel));
+    if(audioLevelBar!=null)audioLevelBar.setProgress(detectedAudioLevel);
+    if(audioLevelStatus!=null){
+      if(activeSessions.isEmpty())audioLevelStatus.setText("Play an imported audio track to test detection.");
+      else if(captured==0)audioLevelStatus.setText("Audio capture unavailable • check permission");
+      else audioLevelStatus.setText("Mix detected • "+captured+" layer(s) • level "+detectedAudioLevel+"%");
+    }
     levelHandler.postDelayed(this,120);
   }};
   private void releaseLevelVisualizer(){
-    if(levelVisualizer!=null){try{levelVisualizer.setEnabled(false);levelVisualizer.release();}catch(Exception ignored){}}
-    levelVisualizer=null;levelSessionId=-1;
+    for(android.media.audiofx.Visualizer viz:levelVisualizers.values()){
+      try{viz.setEnabled(false);viz.release();}catch(Exception ignored){}
+    }
+    levelVisualizers.clear();
+    detectedRawLevel=0;detectedAudioLevel=0;
   }
   private final Handler goveeFlowHandler=new Handler(Looper.getMainLooper());
   private Runnable goveeFlowTask=null;
