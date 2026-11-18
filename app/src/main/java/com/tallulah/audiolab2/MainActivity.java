@@ -33,6 +33,95 @@ import java.io.FileOutputStream;
 import java.io.FileInputStream;
 
 public class MainActivity extends Activity {
+  private static final int BLE_PERMISSION_REQUEST=861;
+  private android.bluetooth.le.BluetoothLeScanner hismithScanner;
+  private android.bluetooth.le.ScanCallback hismithScanCallback;
+  private android.bluetooth.BluetoothGatt hismithGatt;
+  private TextView hismithBleStatus;
+  private LinearLayout hismithBleResults;
+  private final java.util.HashSet<String> hismithSeen=new java.util.HashSet<>();
+  private final Handler hismithBleHandler=new Handler(Looper.getMainLooper());
+  private boolean hismithScanning=false;
+  private boolean hismithPermissionOk(){
+    if(android.os.Build.VERSION.SDK_INT>=31)return checkSelfPermission("android.permission.BLUETOOTH_SCAN")==android.content.pm.PackageManager.PERMISSION_GRANTED&&checkSelfPermission("android.permission.BLUETOOTH_CONNECT")==android.content.pm.PackageManager.PERMISSION_GRANTED;
+    return checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==android.content.pm.PackageManager.PERMISSION_GRANTED;
+  }
+  private void stopHismithScan(){
+    if(hismithScanner!=null&&hismithScanCallback!=null&&hismithPermissionOk()){
+      try{hismithScanner.stopScan(hismithScanCallback);}catch(Exception ignored){}
+    }
+    hismithScanning=false;
+  }
+  private void closeHismithGatt(){
+    if(hismithGatt!=null){try{hismithGatt.disconnect();hismithGatt.close();}catch(Exception ignored){}hismithGatt=null;}
+  }
+  private void startHismithScan(){
+    if(!hismithPermissionOk()){
+      if(android.os.Build.VERSION.SDK_INT>=31)requestPermissions(new String[]{"android.permission.BLUETOOTH_SCAN","android.permission.BLUETOOTH_CONNECT"},BLE_PERMISSION_REQUEST);
+      else requestPermissions(new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION},BLE_PERMISSION_REQUEST);
+      hismithBleStatus.setText("Allow Nearby devices permission, then tap Scan again.");
+      return;
+    }
+    android.bluetooth.BluetoothManager manager=(android.bluetooth.BluetoothManager)getSystemService(BLUETOOTH_SERVICE);
+    android.bluetooth.BluetoothAdapter adapter=manager==null?null:manager.getAdapter();
+    if(adapter==null||!adapter.isEnabled()){hismithBleStatus.setText("Enable Bluetooth in phone settings first.");return;}
+    stopHismithScan();hismithSeen.clear();hismithBleResults.removeAllViews();
+    hismithScanner=adapter.getBluetoothLeScanner();
+    if(hismithScanner==null){hismithBleStatus.setText("BLE scanning unavailable.");return;}
+    hismithScanCallback=new android.bluetooth.le.ScanCallback(){
+      @Override public void onScanResult(int callbackType,android.bluetooth.le.ScanResult result){
+        android.bluetooth.BluetoothDevice device=result.getDevice();
+        if(device==null)return;
+        String address=device.getAddress();
+        if(!hismithSeen.add(address))return;
+        String name=result.getScanRecord()==null?null:result.getScanRecord().getDeviceName();
+        if(name==null||name.isEmpty())try{name=device.getName();}catch(SecurityException ignored){}
+        final String shown=(name==null||name.isEmpty()?"Unnamed BLE device":name);
+        runOnUiThread(()->{
+          Button item=button(shown+" • "+address+" • "+result.getRssi()+" dBm");
+          hismithBleResults.addView(item);
+          item.setOnClickListener(v->inspectHismithDevice(device,shown));
+          hismithBleStatus.setText("Found "+hismithSeen.size()+" BLE device(s). Tap one to inspect services.");
+        });
+      }
+      @Override public void onScanFailed(int code){runOnUiThread(()->{hismithScanning=false;hismithBleStatus.setText("Scan failed: "+code);});}
+    };
+    try{
+      hismithScanner.startScan(hismithScanCallback);hismithScanning=true;
+      hismithBleStatus.setText("Scanning BLE advertisements for 12 seconds. No motor commands sent.");
+      hismithBleHandler.postDelayed(()->{if(hismithScanning){stopHismithScan();hismithBleStatus.setText("Scan complete • "+hismithSeen.size()+" BLE device(s). Tap a result to inspect.");}},12000);
+    }catch(Exception e){hismithBleStatus.setText("Scan unavailable: "+e.getClass().getSimpleName());}
+  }
+  private void inspectHismithDevice(android.bluetooth.BluetoothDevice device,String name){
+    if(!hismithPermissionOk()){hismithBleStatus.setText("Bluetooth permission needed.");return;}
+    stopHismithScan();closeHismithGatt();
+    hismithBleStatus.setText("Connecting to "+name+" for service discovery only. No writes.");
+    try{
+      hismithGatt=device.connectGatt(this,false,new android.bluetooth.BluetoothGattCallback(){
+        @Override public void onConnectionStateChange(android.bluetooth.BluetoothGatt g,int status,int state){
+          if(status==android.bluetooth.BluetoothGatt.GATT_SUCCESS&&state==android.bluetooth.BluetoothProfile.STATE_CONNECTED){
+            try{g.discoverServices();}catch(Exception e){runOnUiThread(()->hismithBleStatus.setText("Service discovery failed."));}
+          }else if(state==android.bluetooth.BluetoothProfile.STATE_DISCONNECTED){
+            runOnUiThread(()->hismithBleStatus.setText("Disconnected from "+name+" (status "+status+")."));
+          }
+        }
+        @Override public void onServicesDiscovered(android.bluetooth.BluetoothGatt g,int status){
+          runOnUiThread(()->{
+            if(status!=android.bluetooth.BluetoothGatt.GATT_SUCCESS){hismithBleStatus.setText("Service discovery status: "+status);return;}
+            StringBuilder details=new StringBuilder("Services for "+name+" (read-only inspection):");
+            for(android.bluetooth.BluetoothGattService service:g.getServices()){
+              details.append("\nService ").append(service.getUuid());
+              for(android.bluetooth.BluetoothGattCharacteristic c:service.getCharacteristics()){
+                details.append("\n  ").append(c.getUuid()).append(" properties 0x").append(Integer.toHexString(c.getProperties()));
+              }
+            }
+            hismithBleStatus.setText(details.toString());
+          });
+        }
+      },android.bluetooth.BluetoothDevice.TRANSPORT_LE);
+    }catch(Exception e){hismithBleStatus.setText("Connection unavailable: "+e.getClass().getSimpleName());}
+  }
+
   private static final int PICK_AUDIO = 51;
   private final ArrayList<Track> tracks = new ArrayList<>();
   private LinearLayout trackList;
@@ -315,6 +404,16 @@ public class MainActivity extends Activity {
     GradientDrawable rhythmBg=new GradientDrawable();rhythmBg.setColor(0xff1e1e32);rhythmBg.setCornerRadius(28);rhythmCard.setBackground(rhythmBg);rhythmSection.addView(rhythmCard);
     TextView rhythmHeading=text("HISMITH STROKE RHYTHM",18,true);rhythmHeading.setTextColor(0xffb497ff);rhythmCard.addView(rhythmHeading);
     TextView rhythmDesc=text("Audible timing guide only. Does not connect to or control a device.",13,false);rhythmCard.addView(rhythmDesc);
+    LinearLayout bluetoothDiagnostics=collapsibleSection(rhythmSection,"Bluetooth Diagnostics • Read Only",false);
+    bluetoothDiagnostics.addView(text("Scan for nearby BLE devices. Tap a result to inspect service UUIDs and properties. No speed or motor commands are sent. The Hismith app may need to disconnect first.",13,false));
+    hismithBleStatus=text("Not scanned. Keep the wired motor stop accessible.",13,false);
+    bluetoothDiagnostics.addView(hismithBleStatus);
+    Button bleScanButton=button("Scan nearby Bluetooth devices");bluetoothDiagnostics.addView(bleScanButton);
+    bleScanButton.setOnClickListener(v->startHismithScan());
+    Button bleDisconnectButton=button("Disconnect Bluetooth diagnostic");bluetoothDiagnostics.addView(bleDisconnectButton);
+    bleDisconnectButton.setOnClickListener(v->{stopHismithScan();closeHismithGatt();hismithBleStatus.setText("Bluetooth diagnostic disconnected.");});
+    hismithBleResults=new LinearLayout(this);hismithBleResults.setOrientation(1);bluetoothDiagnostics.addView(hismithBleResults);
+
     rhythmStatus=text("Rhythm guide stopped",14,false);rhythmStatus.setPadding(0,14,0,8);rhythmCard.addView(rhythmStatus);
     Button rhythmToggle=button("▶ Start rhythm guide");rhythmCard.addView(rhythmToggle);
     rhythmToggle.setOnClickListener(v->{rhythmEnabled=!rhythmEnabled;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmEnabled){rhythmTick=0;resetRhythmTone();if(strokeSync)resetStrokeClock();else rhythmHandler.post(rhythmTask);rhythmToggle.setText("■ Stop rhythm guide");}else{rhythmToggle.setText("▶ Start rhythm guide");rhythmStatus.setText("Rhythm guide stopped");if(rhythmTone!=null)try{rhythmTone.pause();}catch(Exception ignored){}}});
@@ -1551,5 +1650,5 @@ public class MainActivity extends Activity {
     if(rhythmTone==null)return;
     try{rhythmTone.pause();rhythmTone.setPlaybackHeadPosition(0);rhythmTone.play();}catch(Exception ignored){}
   }
-  @Override protected void onDestroy(){stopReactive();levelTestActive=false;levelHandler.removeCallbacks(levelMonitor);releaseLevelVisualizer();clipHandler.removeCallbacks(clipMonitor);atmosphereOn=false;stereoOn=false;rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
+  @Override protected void onDestroy(){stopHismithScan();closeHismithGatt();stopReactive();levelTestActive=false;levelHandler.removeCallbacks(levelMonitor);releaseLevelVisualizer();clipHandler.removeCallbacks(clipMonitor);atmosphereOn=false;stereoOn=false;rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
 }
