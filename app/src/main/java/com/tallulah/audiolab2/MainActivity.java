@@ -721,7 +721,10 @@ public class MainActivity extends Activity {
     lights.addView(text("Requests 1000K warm white at 1% on all discovered lights. Actual color temperature depends on H801D firmware limits.",12,false));
     emergencyAll.setOnClickListener(v->{
       if(lightIps.isEmpty()){lightStatus.setText("Discover your lights first.");return;}
-      stopGoveeFlow();stopGoveeStrobe();
+      // Emergency override: disable every automatic lighting controller first.
+      stopReactive();
+      stopGoveeFlow();
+      stopGoveeStrobe();
       sendGoveeEmergency(new ArrayList<>(lightIps),lightStatus);
     });
     TextView brightnessText=text("Brightness • 50%",14,true);lights.addView(brightnessText);
