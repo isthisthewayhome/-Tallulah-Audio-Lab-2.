@@ -527,6 +527,13 @@ public class MainActivity extends Activity {
     lightButtons.addView(lightsOff,new LinearLayout.LayoutParams(0,dp(58),1));
     lightsOn.setOnClickListener(v->sendGoveePower(lightIps,lightPicker.getSelectedItemPosition(),true,lightStatus));
     lightsOff.setOnClickListener(v->sendGoveePower(lightIps,lightPicker.getSelectedItemPosition(),false,lightStatus));
+    Button emergencyAll=button("EMERGENCY • ALL ON • 1%");lights.addView(emergencyAll);
+    lights.addView(text("Requests 1000K warm white at 1% on all discovered lights. Actual color temperature depends on H801D firmware limits.",12,false));
+    emergencyAll.setOnClickListener(v->{
+      if(lightIps.isEmpty()){lightStatus.setText("Discover your lights first.");return;}
+      stopGoveeFlow();stopGoveeStrobe();
+      sendGoveeEmergency(new ArrayList<>(lightIps),lightStatus);
+    });
     TextView brightnessText=text("Brightness • 50%",14,true);lights.addView(brightnessText);
     SeekBar brightnessBar=new SeekBar(this);brightnessBar.setMax(99);brightnessBar.setProgress(49);brightnessBar.setMinHeight(dp(64));lights.addView(brightnessBar);
     brightnessBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
@@ -541,32 +548,13 @@ public class MainActivity extends Activity {
         sendGoveeCommand(selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition()),"brightness",value,lightStatus);
       }
     });
-    TextView colorHeading=text("COLOR CONTROL",18,true);colorHeading.setTextColor(0xffD9B6FF);lights.addView(colorHeading);
-    TextView colorPreview=text("Selected color",15,true);colorPreview.setGravity(android.view.Gravity.CENTER);
-    colorPreview.setTextColor(Color.WHITE);colorPreview.setMinHeight(dp(65));lights.addView(colorPreview);
-    SeekBar hueBar=new SeekBar(this);hueBar.setMax(359);hueBar.setProgress(285);hueBar.setMinHeight(dp(68));
-    lights.addView(text("Color • Red → Purple → Blue → Green",13,false));lights.addView(hueBar);
+    TextView colorHeading=text("COLOR PRESETS",18,true);colorHeading.setTextColor(0xffD9B6FF);lights.addView(colorHeading);
     SeekBar saturationBar=new SeekBar(this);saturationBar.setMax(100);saturationBar.setProgress(100);saturationBar.setMinHeight(dp(68));
     TextView saturationText=text("Color intensity • 100%",13,false);lights.addView(saturationText);lights.addView(saturationBar);
-    final Runnable updateColorPreview=()->{
-      int rgb=Color.HSVToColor(new float[]{hueBar.getProgress(),saturationBar.getProgress()/100f,1f});
-      GradientDrawable swatch=new GradientDrawable();swatch.setColor(rgb);swatch.setCornerRadius(dp(14));
-      colorPreview.setBackground(swatch);
-      colorPreview.setTextColor((Color.red(rgb)*299+Color.green(rgb)*587+Color.blue(rgb)*114)/1000>150?Color.BLACK:Color.WHITE);
-      saturationText.setText("Color intensity • "+saturationBar.getProgress()+"%");
-    };
-    SeekBar.OnSeekBarChangeListener colorListener=new SeekBar.OnSeekBarChangeListener(){
-      public void onProgressChanged(SeekBar bar,int value,boolean user){updateColorPreview.run();}
+    saturationBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar bar,int value,boolean user){saturationText.setText("Color intensity • "+value+"%");}
       public void onStartTrackingTouch(SeekBar bar){}
       public void onStopTrackingTouch(SeekBar bar){}
-    };
-    hueBar.setOnSeekBarChangeListener(colorListener);saturationBar.setOnSeekBarChangeListener(colorListener);updateColorPreview.run();
-    Button applyColor=button("Apply selected color");lights.addView(applyColor);
-    applyColor.setOnClickListener(v->{
-      if(goveeStrobeActive){lightStatus.setText("Stop strobe/pulse before changing color.");return;}
-      stopGoveeFlow();
-      int rgb=Color.HSVToColor(new float[]{hueBar.getProgress(),saturationBar.getProgress()/100f,1f});
-      sendGoveeColor(selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition()),rgb,lightStatus);
     });
     LinearLayout presetColors=new LinearLayout(this);
     presetColors.setOrientation(LinearLayout.HORIZONTAL);
@@ -592,10 +580,10 @@ public class MainActivity extends Activity {
       presetColors.addView(swatch,swatchParams);
       swatch.setOnClickListener(v->{
         float[] hsv=new float[3];Color.colorToHSV(rgb,hsv);
-        hueBar.setProgress(Math.round(hsv[0]));saturationBar.setProgress(Math.round(hsv[1]*100));
+        int adjusted=Color.HSVToColor(new float[]{hsv[0],hsv[1]*saturationBar.getProgress()/100f,hsv[2]});
         if(goveeStrobeActive){lightStatus.setText("Stop strobe/pulse before changing color.");return;}
         stopGoveeFlow();
-        sendGoveeColor(selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition()),rgb,lightStatus);
+        sendGoveeColor(selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition()),adjusted,lightStatus);
       });
     }
     LinearLayout flowSection=collapsibleSection(lights,"Smooth Color Flow",false);
@@ -707,6 +695,35 @@ public class MainActivity extends Activity {
       }catch(Exception ignored){}
       final int count=sent;
       if(label!=null)runOnUiThread(()->label.setText("Sent "+command+" to "+count+"/"+targets.size()+" light(s)."));
+    }).start();
+  }
+  private void sendGoveeEmergency(ArrayList<String> targets,TextView label){
+    label.setText("Sending emergency all-on settings to "+targets.size()+" lights…");
+    new Thread(()->{
+      int sent=0;
+      try(java.net.DatagramSocket socket=new java.net.DatagramSocket()){
+        for(String ip:targets){
+          try{
+            JSONObject power=new JSONObject();power.put("value",1);
+            JSONObject white=new JSONObject();
+            JSONObject rgb=new JSONObject();rgb.put("r",0);rgb.put("g",0);rgb.put("b",0);
+            white.put("color",rgb);white.put("colorTemInKelvin",1000);
+            JSONObject dim=new JSONObject();dim.put("value",1);
+            JSONObject[] data={power,white,dim};
+            String[] cmds={"turn","colorwc","brightness"};
+            for(int j=0;j<cmds.length;j++){
+              JSONObject msg=new JSONObject();msg.put("cmd",cmds[j]);msg.put("data",data[j]);
+              JSONObject packet=new JSONObject();packet.put("msg",msg);
+              byte[] bytes=packet.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+              socket.send(new java.net.DatagramPacket(bytes,bytes.length,java.net.InetAddress.getByName(ip),4003));
+              Thread.sleep(80);
+            }
+            sent++;
+          }catch(Exception ignored){}
+        }
+      }catch(Exception ignored){}
+      final int count=sent;
+      runOnUiThread(()->label.setText("Emergency commands sent to "+count+"/"+targets.size()+" lights. Verify warmth and 1% brightness; 1000K may be unsupported."));
     }).start();
   }
   private void sendGoveeColor(ArrayList<String> targets,int rgb,TextView label){
