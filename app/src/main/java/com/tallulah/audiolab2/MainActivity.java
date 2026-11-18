@@ -50,7 +50,7 @@ public class MainActivity extends Activity {
   private final Handler goveeFlowHandler=new Handler(Looper.getMainLooper());
   private Runnable goveeFlowTask=null;
   private boolean goveeFlowActive=false;
-  private int goveeFlowStepMs=600;
+  private int goveeFlowStepMs=350;
   private ArrayList<String> goveeFlowTargets=new ArrayList<>();
   private int goveeFlowStep=0;
   private int goveeFlowMode=0;
@@ -587,8 +587,8 @@ public class MainActivity extends Activity {
     ArrayAdapter<String> flowAdapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Gothic Flow • Red / Plum / Purple","Ocean Flow • Blue / Turquoise"});
     flowMode.setAdapter(flowAdapter);flowSection.addView(flowMode);
     flowSection.addView(text("Transition speed • Slow                         Fast",13,false));
-    SeekBar flowSpeed=new SeekBar(this);flowSpeed.setMax(4);flowSpeed.setProgress(2);flowSpeed.setMinHeight(dp(72));flowSection.addView(flowSpeed);
-    int[] flowDelays={1400,950,600,400,280};
+    SeekBar flowSpeed=new SeekBar(this);flowSpeed.setMax(6);flowSpeed.setProgress(3);flowSpeed.setMinHeight(dp(72));flowSection.addView(flowSpeed);
+    int[] flowDelays={1400,950,600,350,240,170,120};
     flowSpeed.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
       public void onProgressChanged(SeekBar bar,int p,boolean user){goveeFlowStepMs=flowDelays[p];}
       public void onStartTrackingTouch(SeekBar bar){}
