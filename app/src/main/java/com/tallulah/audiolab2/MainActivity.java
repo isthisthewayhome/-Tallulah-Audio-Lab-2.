@@ -63,6 +63,8 @@ public class MainActivity extends Activity {
   private int reactiveLast=-1;
   private TextView reactiveDiagnostic=null;
   private long reactiveLastSentAt=0;
+  private int reactiveCommandCount=0;
+  private int reactiveLastRequested=-1;
   private final Handler reactiveHandler=new Handler(Looper.getMainLooper());
   private final Runnable reactiveTick=new Runnable(){public void run(){
     if(!reactiveActive)return;
@@ -75,9 +77,11 @@ public class MainActivity extends Activity {
     double normalized=Math.max(0,Math.min(1,(raw-reactiveBaseline+range*0.2)/range));
     reactiveSmoothed=reactiveSmoothed*0.45+normalized*0.55;
     int brightness=Math.max(5,Math.min(100,(int)Math.round(5+reactiveSmoothed*95)));
-    if(reactiveDiagnostic!=null)reactiveDiagnostic.setText("Audio: "+detectedAudioLevel+"% • Raw: "+String.format(java.util.Locale.US,"%.1f",raw)+" • Brightness: "+brightness+"%");
+    if(reactiveDiagnostic!=null)reactiveDiagnostic.setText("Audio: "+detectedAudioLevel+"% • Raw: "+String.format(java.util.Locale.US,"%.1f",raw)+" • Target: "+brightness+"% • Last sent: "+reactiveLastRequested+"% • Commands: "+reactiveCommandCount);
     if(Math.abs(brightness-reactiveLast)>=2){
       reactiveLast=brightness;
+      reactiveLastRequested=brightness;
+      reactiveCommandCount++;
       ArrayList<String> target=new ArrayList<>(reactiveIps);
       sendGoveeCommand(target,"brightness",brightness,null);
     }
@@ -648,7 +652,7 @@ public class MainActivity extends Activity {
       if(!levelTestActive){lightStatus.setText("Start Audio Detection first.");return;}
       if(lightIps.size()!=4){lightStatus.setText("Find all four lights before starting this test. Found: "+lightIps.size());return;}
       stopGoveeFlow();stopGoveeStrobe();stopReactive();
-      reactiveIps.addAll(lightIps);reactiveSmoothed=0;reactiveBaseline=detectedRawLevel;reactivePeak=detectedRawLevel+5;reactiveActive=true;
+      reactiveIps.addAll(lightIps);reactiveCommandCount=0;reactiveLastRequested=-1;reactiveSmoothed=0;reactiveBaseline=detectedRawLevel;reactivePeak=detectedRawLevel+5;reactiveActive=true;
       sendGoveeCommand(new ArrayList<>(reactiveIps),"turn",1,null);
       reactiveHandler.post(reactiveTick);
       lightStatus.setText("Reactive brightness running on all four lights.");
