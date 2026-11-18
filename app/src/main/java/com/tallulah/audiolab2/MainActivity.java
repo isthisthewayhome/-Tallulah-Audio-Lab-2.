@@ -47,6 +47,17 @@ public class MainActivity extends Activity {
   private void positionMix(int ms){mixClockPositionMs=Math.max(0,Math.min(getMixDuration(),ms));if(playing)mixClockStartedAt=android.os.SystemClock.elapsedRealtime()-mixClockPositionMs;for(Track t:tracks){try{t.player.pause();int local=mixClockPositionMs-t.startAtMs;t.player.seekTo(t.trimStartMs+Math.max(0,Math.min(local,t.trimEndMs-t.trimStartMs)));t.scheduledActive=false;}catch(Exception ignored){}}updateVolumes();}
   private final Handler clipHandler=new Handler(Looper.getMainLooper());
   private final Runnable clipMonitor=new Runnable(){public void run(){if(playing){int now=mixPosition();for(Track t:tracks){try{int local=now-t.startAtMs;if(local>=0&&local<t.trimEndMs-t.trimStartMs&&!t.scheduledActive&&(!hasSolo()||t.solo)){t.player.seekTo(t.trimStartMs+local);updateVolumes();t.player.start();t.scheduledActive=true;}if(local>=t.trimEndMs-t.trimStartMs&&t.scheduledActive&&!t.loop.isChecked()){t.player.pause();t.scheduledActive=false;}}catch(Exception ignored){}}if(now>=getMixDuration()){playing=false;mixClockPositionMs=getMixDuration();}}for(Track t:tracks){try{if(t.player.isPlaying()&&t.trimEndMs<t.player.getDuration()-150&&t.player.getCurrentPosition()>=t.trimEndMs){if(t.loop.isChecked()){t.player.seekTo(t.trimStartMs);}else{t.player.pause();t.player.seekTo(t.trimStartMs);}}}catch(Exception ignored){}}updateVolumes();updateMasterTimeline();updateTrackProgress();clipHandler.postDelayed(this,80);}};
+  private final Handler goveeFlowHandler=new Handler(Looper.getMainLooper());
+  private Runnable goveeFlowTask=null;
+  private boolean goveeFlowActive=false;
+  private int goveeFlowStepMs=600;
+  private ArrayList<String> goveeFlowTargets=new ArrayList<>();
+  private int goveeFlowStep=0;
+  private int goveeFlowMode=0;
+  private final int[][] goveeFlowPalettes={
+    {0xff5C001B,0xffA11B52,0xff592079,0xff300D45},
+    {0xff001D60,0xff034D9A,0xff008B9D,0xff003D74}
+  };
   private final Handler goveeStrobeHandler=new Handler(Looper.getMainLooper());
   private Runnable goveeStrobeTask=null;
   private boolean goveeStrobeActive=false;
@@ -553,6 +564,7 @@ public class MainActivity extends Activity {
     Button applyColor=button("Apply selected color");lights.addView(applyColor);
     applyColor.setOnClickListener(v->{
       if(goveeStrobeActive){lightStatus.setText("Stop strobe/pulse before changing color.");return;}
+      stopGoveeFlow();
       int rgb=Color.HSVToColor(new float[]{hueBar.getProgress(),saturationBar.getProgress()/100f,1f});
       sendGoveeColor(selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition()),rgb,lightStatus);
     });
@@ -569,6 +581,46 @@ public class MainActivity extends Activity {
         sendGoveeColor(selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition()),rgb,lightStatus);
       });
     }
+    LinearLayout flowSection=collapsibleSection(lights,"Smooth Color Flow",false);
+    flowSection.addView(text("Fluid color changes • selected light or all four",13,false));
+    Spinner flowMode=new Spinner(this);
+    ArrayAdapter<String> flowAdapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Gothic Flow • Red / Plum / Purple","Ocean Flow • Blue / Turquoise"});
+    flowMode.setAdapter(flowAdapter);flowSection.addView(flowMode);
+    flowSection.addView(text("Transition speed • Slow                         Fast",13,false));
+    SeekBar flowSpeed=new SeekBar(this);flowSpeed.setMax(4);flowSpeed.setProgress(2);flowSpeed.setMinHeight(dp(72));flowSection.addView(flowSpeed);
+    int[] flowDelays={1400,950,600,400,280};
+    flowSpeed.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar bar,int p,boolean user){goveeFlowStepMs=flowDelays[p];}
+      public void onStartTrackingTouch(SeekBar bar){}
+      public void onStopTrackingTouch(SeekBar bar){}
+    });
+    Button flowStart=button("▶ Start Color Flow");flowSection.addView(flowStart);
+    Button flowStop=button("■ Stop Color Flow");flowSection.addView(flowStop);
+    flowStart.setOnClickListener(v->{
+      if(goveeStrobeActive){lightStatus.setText("Stop strobe before starting Color Flow.");return;}
+      ArrayList<String> targets=selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition());
+      if(targets.isEmpty()){lightStatus.setText("Find Govee lights first.");return;}
+      stopGoveeFlow();
+      goveeFlowTargets=new ArrayList<>(targets);
+      goveeFlowMode=flowMode.getSelectedItemPosition();goveeFlowStep=0;goveeFlowActive=true;
+      goveeFlowTask=new Runnable(){public void run(){
+        if(!goveeFlowActive)return;
+        int[] palette=goveeFlowPalettes[Math.max(0,Math.min(1,goveeFlowMode))];
+        // Blend between adjacent palette colors over eight incremental steps.
+        int segment=(goveeFlowStep/8)%palette.length;
+        float blend=(goveeFlowStep%8)/8f;
+        int first=palette[segment],second=palette[(segment+1)%palette.length];
+        int red=Math.round(Color.red(first)*(1-blend)+Color.red(second)*blend);
+        int green=Math.round(Color.green(first)*(1-blend)+Color.green(second)*blend);
+        int blue=Math.round(Color.blue(first)*(1-blend)+Color.blue(second)*blend);
+        sendGoveeColor(new ArrayList<>(goveeFlowTargets),Color.rgb(red,green,blue),null);
+        goveeFlowStep++;
+        goveeFlowHandler.postDelayed(this,goveeFlowStepMs);
+      }};
+      goveeFlowHandler.post(goveeFlowTask);
+      lightStatus.setText("Color Flow running • use Stop to hold current color.");
+    });
+    flowStop.setOnClickListener(v->{stopGoveeFlow();lightStatus.setText("Color Flow stopped • current color held.");});
     TextView strobeTitle=text("Strobe • current light color",16,true);lights.addView(strobeTitle);
     TextView strobeSpeed=text("Strobe speed • Slow                         Fast",13,false);lights.addView(strobeSpeed);
     SeekBar strobeSlider=new SeekBar(this);strobeSlider.setMax(3);strobeSlider.setProgress(1);strobeSlider.setMinHeight(dp(64));lights.addView(strobeSlider);
@@ -587,6 +639,7 @@ public class MainActivity extends Activity {
     strobeStop.setMinHeight(dp(78));lights.addView(strobeStop);
     strobeStart.setOnClickListener(v->{
       if(goveeStrobeActive){lightStatus.setText("Strobe is already running.");return;}
+      stopGoveeFlow();
       ArrayList<String> targets=selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition());
       if(targets.isEmpty()){lightStatus.setText("Discover the lights first.");return;}
       goveeStrobeTargets=new ArrayList<>(targets);
@@ -640,7 +693,7 @@ public class MainActivity extends Activity {
     }).start();
   }
   private void sendGoveeColor(ArrayList<String> targets,int rgb,TextView label){
-    if(targets.isEmpty()){label.setText("Find Govee lights first.");return;}
+    if(targets.isEmpty()){if(label!=null)label.setText("Find Govee lights first.");return;}
     new Thread(()->{
       int sent=0;
       try(java.net.DatagramSocket socket=new java.net.DatagramSocket()){
@@ -656,8 +709,13 @@ public class MainActivity extends Activity {
         }
       }catch(Exception ignored){}
       final int count=sent;
-      runOnUiThread(()->label.setText("Color sent to "+count+"/"+targets.size()+" light(s). Check the actual color."));
+      if(label!=null)runOnUiThread(()->label.setText("Color sent to "+count+"/"+targets.size()+" light(s). Check the actual color."));
     }).start();
+  }
+  private void stopGoveeFlow(){
+    goveeFlowActive=false;
+    if(goveeFlowTask!=null)goveeFlowHandler.removeCallbacks(goveeFlowTask);
+    goveeFlowTargets.clear();
   }
   private void stopGoveeStrobe(){
     goveeStrobeActive=false;
