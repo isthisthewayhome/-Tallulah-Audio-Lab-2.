@@ -531,19 +531,21 @@ public class MainActivity extends Activity {
       }
     });
     TextView strobeTitle=text("Strobe • current light color",16,true);lights.addView(strobeTitle);
-    TextView strobeSpeed=text("Flash cycle • 1.0 second",13,false);lights.addView(strobeSpeed);
+    TextView strobeSpeed=text("Strobe speed • Slow                         Fast",13,false);lights.addView(strobeSpeed);
     SeekBar strobeSlider=new SeekBar(this);strobeSlider.setMax(3);strobeSlider.setProgress(1);strobeSlider.setMinHeight(dp(64));lights.addView(strobeSlider);
     int[] strobeIntervals={2000,1000,750,500};
     strobeSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
       public void onProgressChanged(SeekBar bar,int p,boolean user){
         goveeStrobeIntervalMs=strobeIntervals[p];
-        strobeSpeed.setText(String.format(java.util.Locale.US,"Flash cycle • %.2f seconds",goveeStrobeIntervalMs/1000.0));
+
       }
       public void onStartTrackingTouch(SeekBar bar){}
       public void onStopTrackingTouch(SeekBar bar){}
     });
-    Button strobeStart=button("Start strobe");lights.addView(strobeStart);
-    Button strobeStop=button("Stop strobe • steady ON");lights.addView(strobeStop);
+    CheckBox pulseMode=new CheckBox(this);pulseMode.setText("Soft pulse (dim / bright instead of off / on)");pulseMode.setTextColor(Color.WHITE);lights.addView(pulseMode);
+    Button strobeStart=button("Start strobe / pulse");lights.addView(strobeStart);
+    Button strobeStop=button("■ STOP • STEADY LIGHT");strobeStop.setTextSize(19);
+    strobeStop.setMinHeight(dp(78));lights.addView(strobeStop);
     strobeStart.setOnClickListener(v->{
       if(goveeStrobeActive){lightStatus.setText("Strobe is already running.");return;}
       ArrayList<String> targets=selectedGoveeTargets(lightIps,lightPicker.getSelectedItemPosition());
@@ -555,14 +557,23 @@ public class MainActivity extends Activity {
       goveeStrobeTask=new Runnable(){public void run(){
         if(!goveeStrobeActive)return;
         lit[0]=!lit[0];
-        sendGoveeCommand(goveeStrobeTargets,"turn",lit[0]?1:0,null);
+        if(pulseMode.isChecked()){
+          sendGoveeCommand(goveeStrobeTargets,"brightness",lit[0]?goveeStrobeBrightness:Math.max(1,goveeStrobeBrightness/5),null);
+        }else{
+          sendGoveeCommand(goveeStrobeTargets,"turn",lit[0]?1:0,null);
+        }
         goveeStrobeHandler.postDelayed(this,Math.max(250,goveeStrobeIntervalMs/2));
       }};
       sendGoveeCommand(targets,"brightness",goveeStrobeBrightness,null);
       goveeStrobeHandler.postDelayed(goveeStrobeTask,Math.max(250,goveeStrobeIntervalMs/2));
       lightStatus.setText("Strobe running • tap Stop for steady light");
     });
-    strobeStop.setOnClickListener(v->{stopGoveeStrobe();lightStatus.setText("Strobe stopped • lights set to steady ON");});
+    strobeStop.setOnClickListener(v->{
+      ArrayList<String> targets=new ArrayList<>(goveeStrobeTargets);
+      stopGoveeStrobe();
+      if(!targets.isEmpty())sendGoveeCommand(targets,"brightness",goveeStrobeBrightness,null);
+      lightStatus.setText("Effect stopped • lights set to steady ON");
+    });
     lights.addView(text("Flashing lights may trigger seizures or migraines. Stop immediately if uncomfortable. No automatic color changes.",12,false));
     TextView foot=text("Govee LAN controls are in testing. Keep using Govee Home if discovery fails.",13,false);foot.setTextColor(0xffb7a5be);foot.setPadding(0,28,0,0);root.addView(foot);
   }
