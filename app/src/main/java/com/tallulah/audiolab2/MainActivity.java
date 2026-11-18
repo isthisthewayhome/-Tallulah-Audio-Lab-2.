@@ -52,6 +52,7 @@ public class MainActivity extends Activity {
   private ProgressBar audioLevelBar=null;
   private TextView audioLevelStatus=null;
   private int levelSessionId=-1;
+  private int audioSensitivity=60;
   private final Handler levelHandler=new Handler(Looper.getMainLooper());
   private final Runnable levelMonitor=new Runnable(){public void run(){
     if(!levelTestActive)return;
@@ -73,7 +74,7 @@ public class MainActivity extends Activity {
         if(levelVisualizer.getWaveForm(wave)==android.media.audiofx.Visualizer.SUCCESS){
           double sum=0;
           for(byte sample:wave){int v=(sample&255)-128;sum+=v*v;}
-          int percent=Math.min(100,(int)Math.round(Math.sqrt(sum/wave.length)/128.0*180));
+          int percent=Math.min(100,(int)Math.round(Math.sqrt(sum/wave.length)/128.0*180*(audioSensitivity/100.0)));
           if(audioLevelBar!=null)audioLevelBar.setProgress(percent);
           if(audioLevelStatus!=null)audioLevelStatus.setText("Audio detected • level "+percent+"%");
         }
@@ -508,6 +509,24 @@ public class MainActivity extends Activity {
     audioLevelBar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
     audioLevelBar.setMax(100);audioLevelBar.setProgress(0);audioLevelBar.setMinHeight(dp(45));audioDetection.addView(audioLevelBar);
     audioLevelStatus=text("Detection stopped",14,false);audioDetection.addView(audioLevelStatus);
+    TextView sensitivityLabel=text("Sensitivity • -40%",14,true);audioDetection.addView(sensitivityLabel);
+    LinearLayout sensitivityRow=new LinearLayout(this);sensitivityRow.setOrientation(LinearLayout.HORIZONTAL);
+    audioDetection.addView(sensitivityRow);
+    Button sensitivityMinus=button("−");sensitivityRow.addView(sensitivityMinus,new LinearLayout.LayoutParams(dp(58),dp(64)));
+    SeekBar sensitivitySlider=new SeekBar(this);sensitivitySlider.setMax(180);sensitivitySlider.setProgress(40);
+    sensitivityRow.addView(sensitivitySlider,new LinearLayout.LayoutParams(0,dp(64),1));
+    Button sensitivityPlus=button("+");sensitivityRow.addView(sensitivityPlus,new LinearLayout.LayoutParams(dp(58),dp(64)));
+    sensitivitySlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar bar,int progress,boolean user){
+        audioSensitivity=progress+20;
+        int adjustment=audioSensitivity-100;
+        sensitivityLabel.setText("Sensitivity • "+(adjustment>0?"+":"")+adjustment+"%");
+      }
+      public void onStartTrackingTouch(SeekBar bar){}
+      public void onStopTrackingTouch(SeekBar bar){}
+    });
+    sensitivityMinus.setOnClickListener(v->sensitivitySlider.setProgress(Math.max(0,sensitivitySlider.getProgress()-5)));
+    sensitivityPlus.setOnClickListener(v->sensitivitySlider.setProgress(Math.min(180,sensitivitySlider.getProgress()+5)));
     Button levelStart=button("Start audio detection");audioDetection.addView(levelStart);
     Button levelStop=button("Stop audio detection");audioDetection.addView(levelStop);
     levelStart.setOnClickListener(v->{
