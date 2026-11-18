@@ -53,6 +53,30 @@ public class MainActivity extends Activity {
   private TextView audioLevelStatus=null;
   private int levelSessionId=-1;
   private int audioSensitivity=60;
+  private int detectedAudioLevel=0;
+  private boolean reactiveActive=false;
+  private String reactiveIp=null;
+  private int reactiveDelay=350;
+  private double reactiveSmoothed=0;
+  private int reactiveLast=-1;
+  private final Handler reactiveHandler=new Handler(Looper.getMainLooper());
+  private final Runnable reactiveTick=new Runnable(){public void run(){
+    if(!reactiveActive)return;
+    if(!levelTestActive||reactiveIp==null){stopReactive();return;}
+    reactiveSmoothed=reactiveSmoothed*0.65+detectedAudioLevel*0.35;
+    int brightness=Math.max(1,Math.min(100,(int)Math.round(3+reactiveSmoothed*0.97)));
+    if(Math.abs(brightness-reactiveLast)>=3){
+      reactiveLast=brightness;
+      ArrayList<String> target=new ArrayList<>();target.add(reactiveIp);
+      sendGoveeCommand(target,"brightness",brightness,null);
+    }
+    reactiveHandler.postDelayed(this,reactiveDelay);
+  }};
+  private void stopReactive(){
+    reactiveActive=false;reactiveHandler.removeCallbacks(reactiveTick);
+    reactiveIp=null;reactiveLast=-1;
+  }
+
   private final Handler levelHandler=new Handler(Looper.getMainLooper());
   private final Runnable levelMonitor=new Runnable(){public void run(){
     if(!levelTestActive)return;
@@ -75,6 +99,7 @@ public class MainActivity extends Activity {
           double sum=0;
           for(byte sample:wave){int v=(sample&255)-128;sum+=v*v;}
           int percent=Math.min(100,(int)Math.round(Math.sqrt(sum/wave.length)/128.0*180*(audioSensitivity/100.0)));
+          detectedAudioLevel=percent;
           if(audioLevelBar!=null)audioLevelBar.setProgress(percent);
           if(audioLevelStatus!=null)audioLevelStatus.setText("Audio detected • level "+percent+"%");
         }
@@ -537,7 +562,7 @@ public class MainActivity extends Activity {
       audioLevelStatus.setText("Waiting for an imported track to play…");
     });
     levelStop.setOnClickListener(v->{
-      levelTestActive=false;levelHandler.removeCallbacks(levelMonitor);releaseLevelVisualizer();
+      stopReactive();levelTestActive=false;levelHandler.removeCallbacks(levelMonitor);releaseLevelVisualizer();
       audioLevelBar.setProgress(0);audioLevelStatus.setText("Detection stopped");
     });
     LinearLayout lights=collapsibleSection(root,"Govee Lighting",false);
@@ -548,6 +573,35 @@ public class MainActivity extends Activity {
     ArrayAdapter<String> lightAdapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,lightNames);
     lightPicker.setAdapter(lightAdapter);
     ArrayList<String> lightIps=new ArrayList<>();
+    LinearLayout reactiveSection=collapsibleSection(lights,"Audio-Reactive Brightness • One-Light Test",false);
+    reactiveSection.addView(text("Start Audio Detection first, then select one light. The other lights stay unchanged.",13,false));
+    reactiveSection.addView(text("Reaction speed • Smooth                         Responsive",13,false));
+    SeekBar reactiveSpeed=new SeekBar(this);reactiveSpeed.setMax(4);reactiveSpeed.setProgress(2);
+    reactiveSpeed.setMinHeight(dp(68));reactiveSection.addView(reactiveSpeed);
+    int[] reactiveIntervals={850,550,350,260,200};
+    reactiveSpeed.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar bar,int p,boolean user){reactiveDelay=reactiveIntervals[p];}
+      public void onStartTrackingTouch(SeekBar bar){}
+      public void onStopTrackingTouch(SeekBar bar){}
+    });
+    Button reactiveStart=button("Start reactive brightness");reactiveSection.addView(reactiveStart);
+    Button reactiveStop=button("■ Stop reactive lighting");reactiveSection.addView(reactiveStop);
+    reactiveStart.setOnClickListener(v->{
+      if(!levelTestActive){lightStatus.setText("Start Audio Detection first.");return;}
+      int selected=lightPicker.getSelectedItemPosition();
+      if(selected<1||selected>lightIps.size()){lightStatus.setText("Select ONE light for the first test.");return;}
+      stopGoveeFlow();stopGoveeStrobe();stopReactive();
+      reactiveIp=lightIps.get(selected-1);reactiveSmoothed=detectedAudioLevel;reactiveActive=true;
+      ArrayList<String> one=new ArrayList<>();one.add(reactiveIp);
+      sendGoveeCommand(one,"turn",1,null);
+      reactiveHandler.post(reactiveTick);
+      lightStatus.setText("Reactive brightness running on one light.");
+    });
+    reactiveStop.setOnClickListener(v->{
+      String previous=reactiveIp;stopReactive();
+      if(previous!=null){ArrayList<String> one=new ArrayList<>();one.add(previous);sendGoveeCommand(one,"brightness",50,null);}
+      lightStatus.setText("Reactive brightness stopped. Test light set to 50%.");
+    });
     Button scanLights=button("Find Govee lights");lights.addView(scanLights);
     scanLights.setOnClickListener(v->{
       lightStatus.setText("Scanning LAN for Govee lights…");
@@ -1383,5 +1437,5 @@ public class MainActivity extends Activity {
     if(rhythmTone==null)return;
     try{rhythmTone.pause();rhythmTone.setPlaybackHeadPosition(0);rhythmTone.play();}catch(Exception ignored){}
   }
-  @Override protected void onDestroy(){levelTestActive=false;levelHandler.removeCallbacks(levelMonitor);releaseLevelVisualizer();clipHandler.removeCallbacks(clipMonitor);atmosphereOn=false;stereoOn=false;rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
+  @Override protected void onDestroy(){stopReactive();levelTestActive=false;levelHandler.removeCallbacks(levelMonitor);releaseLevelVisualizer();clipHandler.removeCallbacks(clipMonitor);atmosphereOn=false;stereoOn=false;rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
 }
