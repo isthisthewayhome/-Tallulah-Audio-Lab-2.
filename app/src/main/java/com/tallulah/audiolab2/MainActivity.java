@@ -55,26 +55,26 @@ public class MainActivity extends Activity {
   private int audioSensitivity=60;
   private int detectedAudioLevel=0;
   private boolean reactiveActive=false;
-  private String reactiveIp=null;
+  private final ArrayList<String> reactiveIps=new ArrayList<>();
   private int reactiveDelay=350;
   private double reactiveSmoothed=0;
   private int reactiveLast=-1;
   private final Handler reactiveHandler=new Handler(Looper.getMainLooper());
   private final Runnable reactiveTick=new Runnable(){public void run(){
     if(!reactiveActive)return;
-    if(!levelTestActive||reactiveIp==null){stopReactive();return;}
+    if(!levelTestActive||reactiveIps.isEmpty()){stopReactive();return;}
     reactiveSmoothed=reactiveSmoothed*0.65+detectedAudioLevel*0.35;
     int brightness=Math.max(1,Math.min(100,(int)Math.round(3+reactiveSmoothed*0.97)));
     if(Math.abs(brightness-reactiveLast)>=3){
       reactiveLast=brightness;
-      ArrayList<String> target=new ArrayList<>();target.add(reactiveIp);
+      ArrayList<String> target=new ArrayList<>(reactiveIps);
       sendGoveeCommand(target,"brightness",brightness,null);
     }
     reactiveHandler.postDelayed(this,reactiveDelay);
   }};
   private void stopReactive(){
     reactiveActive=false;reactiveHandler.removeCallbacks(reactiveTick);
-    reactiveIp=null;reactiveLast=-1;
+    reactiveIps.clear();reactiveLast=-1;
   }
 
   private final Handler levelHandler=new Handler(Looper.getMainLooper());
@@ -573,8 +573,8 @@ public class MainActivity extends Activity {
     ArrayAdapter<String> lightAdapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,lightNames);
     lightPicker.setAdapter(lightAdapter);
     ArrayList<String> lightIps=new ArrayList<>();
-    LinearLayout reactiveSection=collapsibleSection(lights,"Audio-Reactive Brightness • One-Light Test",false);
-    reactiveSection.addView(text("Start Audio Detection first, then select one light. The other lights stay unchanged.",13,false));
+    LinearLayout reactiveSection=collapsibleSection(lights,"Audio-Reactive Brightness • Four-Light Test",false);
+    reactiveSection.addView(text("Start Audio Detection first. All four discovered lights will react together, regardless of the light selector.",13,false));
     reactiveSection.addView(text("Reaction speed • Smooth                         Responsive",13,false));
     SeekBar reactiveSpeed=new SeekBar(this);reactiveSpeed.setMax(4);reactiveSpeed.setProgress(2);
     reactiveSpeed.setMinHeight(dp(68));reactiveSection.addView(reactiveSpeed);
@@ -588,19 +588,18 @@ public class MainActivity extends Activity {
     Button reactiveStop=button("■ Stop reactive lighting");reactiveSection.addView(reactiveStop);
     reactiveStart.setOnClickListener(v->{
       if(!levelTestActive){lightStatus.setText("Start Audio Detection first.");return;}
-      int selected=lightPicker.getSelectedItemPosition();
-      if(selected<1||selected>lightIps.size()){lightStatus.setText("Select ONE light for the first test.");return;}
+      if(lightIps.size()!=4){lightStatus.setText("Find all four lights before starting this test. Found: "+lightIps.size());return;}
       stopGoveeFlow();stopGoveeStrobe();stopReactive();
-      reactiveIp=lightIps.get(selected-1);reactiveSmoothed=detectedAudioLevel;reactiveActive=true;
-      ArrayList<String> one=new ArrayList<>();one.add(reactiveIp);
-      sendGoveeCommand(one,"turn",1,null);
+      reactiveIps.addAll(lightIps);reactiveSmoothed=detectedAudioLevel;reactiveActive=true;
+      sendGoveeCommand(new ArrayList<>(reactiveIps),"turn",1,null);
       reactiveHandler.post(reactiveTick);
-      lightStatus.setText("Reactive brightness running on one light.");
+      lightStatus.setText("Reactive brightness running on all four lights.");
     });
     reactiveStop.setOnClickListener(v->{
-      String previous=reactiveIp;stopReactive();
-      if(previous!=null){ArrayList<String> one=new ArrayList<>();one.add(previous);sendGoveeCommand(one,"brightness",50,null);}
-      lightStatus.setText("Reactive brightness stopped. Test light set to 50%.");
+      ArrayList<String> previous=new ArrayList<>(reactiveIps);
+      stopReactive();
+      if(!previous.isEmpty())sendGoveeCommand(previous,"brightness",50,null);
+      lightStatus.setText("Reactive brightness stopped. All four lights set to 50%.");
     });
     Button scanLights=button("Find Govee lights");lights.addView(scanLights);
     scanLights.setOnClickListener(v->{
