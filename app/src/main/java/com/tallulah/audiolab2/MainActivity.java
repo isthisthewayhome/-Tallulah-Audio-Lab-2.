@@ -497,16 +497,33 @@ public class MainActivity extends Activity {
     clipHandler.post(clipMonitor);
     getWindow().setStatusBarColor(bg);
     getWindow().setNavigationBarColor(bg);
-    ScrollView scroll = new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(bg);
+    ScrollView scroll = new ScrollView(this);homeScroll=scroll;scroll.setFillViewport(true);scroll.setBackgroundColor(bg);
     LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setPadding(24,30,24,24);scroll.addView(root);setContentView(scroll);
     TextView eyebrow=text("Y O U R   P R I V A T E   S O U N D   S T U D I O",13,true);eyebrow.setTextColor(accent);root.addView(eyebrow);
     TextView heading=text("Tallulah Audio Lab",30,true);heading.setTextColor(Color.WHITE);root.addView(heading);
     TextView sub=text("Layer audio and design your own soundscapes.",13,false);sub.setTextColor(0xffc6a6cf);root.addView(sub);
     LinearLayout audioStudio=collapsibleSection(root,"♫  Audio Studio",true);
+    LinearLayout hismithGroup=collapsibleSection(root,"⚡  Hismith Machine & Live Sync",false);
     LinearLayout soundGenerators=collapsibleSection(root,"♫  Sound Generators",false);
     LinearLayout lightingGroup=collapsibleSection(root,"✦  Govee Lighting",false);
     LinearLayout syncGroup=collapsibleSection(root,"◉  Audio Sync",false);
     LinearLayout advancedGroup=collapsibleSection(root,"⚙  Advanced Settings",false);
+    LinearLayout quickNav=new LinearLayout(this);quickNav.setOrientation(1);
+    root.addView(quickNav,3);
+    quickNav.addView(text("QUICK NAVIGATION",13,true));
+    quickNav.addView(text("Tap a destination to open it and jump straight there.",12,false));
+    LinearLayout navRow1=new LinearLayout(this);navRow1.setOrientation(0);quickNav.addView(navRow1);
+    Button navAudio=button("♫ Audio");navRow1.addView(navAudio,new LinearLayout.LayoutParams(0,dp(54),1));
+    Button navHismith=button("⚡ Hismith");navRow1.addView(navHismith,new LinearLayout.LayoutParams(0,dp(54),1));
+    LinearLayout navRow2=new LinearLayout(this);navRow2.setOrientation(0);quickNav.addView(navRow2);
+    Button navLights=button("✦ Lights");navRow2.addView(navLights,new LinearLayout.LayoutParams(0,dp(54),1));
+    Button navSync=button("◉ Audio Sync");navRow2.addView(navSync,new LinearLayout.LayoutParams(0,dp(54),1));
+    Button navAdvanced=button("⚙ Settings");quickNav.addView(navAdvanced,new LinearLayout.LayoutParams(-1,dp(48)));
+    navAudio.setOnClickListener(v->jumpToSection(audioStudio));
+    navHismith.setOnClickListener(v->jumpToSection(hismithGroup));
+    navLights.setOnClickListener(v->jumpToSection(lightingGroup));
+    navSync.setOnClickListener(v->jumpToSection(syncGroup));
+    navAdvanced.setOnClickListener(v->jumpToSection(advancedGroup));
     LinearLayout masterSection=collapsibleSection(audioStudio,"Master transport",true);
     Button add=button("＋ Add audio");
     add.setOnClickListener(v->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("audio/*");i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);startActivityForResult(i,PICK_AUDIO);});
@@ -534,7 +551,7 @@ public class MainActivity extends Activity {
     audioSection.addView(add);
     Button video=button("▣ Extract audio from video");audioSection.addView(video);video.setOnClickListener(v->status.setText("Video extraction is not available in this build yet."));
     trackList=new LinearLayout(this);trackList.setOrientation(1);audioSection.addView(trackList);
-    LinearLayout rhythmSection=collapsibleSection(soundGenerators,"Hismith rhythm guide",false);
+    LinearLayout rhythmSection=collapsibleSection(hismithGroup,"Hismith rhythm guide",false);
     LinearLayout rhythmCard=new LinearLayout(this);rhythmCard.setOrientation(1);rhythmCard.setPadding(20,20,20,20);
     GradientDrawable rhythmBg=new GradientDrawable();rhythmBg.setColor(0xff1e1e32);rhythmBg.setCornerRadius(28);rhythmCard.setBackground(rhythmBg);rhythmSection.addView(rhythmCard);
     TextView rhythmHeading=text("HISMITH STROKE RHYTHM",18,true);rhythmHeading.setTextColor(0xffb497ff);rhythmCard.addView(rhythmHeading);
@@ -571,6 +588,9 @@ public class MainActivity extends Activity {
     clearCalibration.setOnClickListener(v->{hismithCalibrationSetting=-1;hismithCalibrationBps=0;renderHismithDashboard();});
     hismithCandidateStatus=text("Candidate speed: waiting for AA 03 packets (unverified)",15,true);bluetoothDiagnostics.addView(hismithCandidateStatus);
     LinearLayout goveeSyncPanel=collapsibleSection(bluetoothDiagnostics,"Hismith → Govee Live Sync (Test)",false);
+    Button jumpLiveSync=button("↳ Open Live Sync controls");
+    hismithGroup.addView(jumpLiveSync,0);
+    jumpLiveSync.setOnClickListener(v->jumpToSection(hismithGroup,rhythmSection,bluetoothDiagnostics,goveeSyncPanel));
     goveeSyncPanel.addView(text("Uses the measured speed-50 reference (2.45 BPS) with provisional proportional scaling. Pulses all discovered lights between 15% and 60% brightness. Bluetooth/Wi-Fi latency can cause drift; this is not motion-locked.",12,false));
     hismithLightSyncStatus=text("Live Sync OFF",13,true);goveeSyncPanel.addView(hismithLightSyncStatus);
     goveeSyncPanel.addView(text("Timing offset • -500 ms to +500 ms",12,false));
@@ -1314,6 +1334,26 @@ public class MainActivity extends Activity {
       runOnUiThread(()->label.setText("Command sent to "+count+"/"+targets.size()+" light(s). Check whether lights responded."));
     }).start();
   }
+  private ScrollView homeScroll;
+  private final java.util.HashMap<LinearLayout,TextView> sectionHeaders=new java.util.HashMap<>();
+  private final java.util.HashMap<LinearLayout,String> sectionTitles=new java.util.HashMap<>();
+  private void jumpToSection(LinearLayout... path){
+    for(LinearLayout content:path){
+      TextView header=sectionHeaders.get(content);
+      if(header!=null&&content.getVisibility()!=View.VISIBLE){
+        content.setVisibility(View.VISIBLE);
+        header.setText("▾  "+sectionTitles.get(content));
+      }
+    }
+    if(path.length>0&&homeScroll!=null){
+      TextView header=sectionHeaders.get(path[path.length-1]);
+      if(header!=null)homeScroll.post(()->{
+        int[] pos=new int[2],base=new int[2];
+        header.getLocationOnScreen(pos);homeScroll.getLocationOnScreen(base);
+        homeScroll.smoothScrollBy(0,pos[1]-base[1]-dp(18));
+      });
+    }
+  }
   private LinearLayout collapsibleSection(LinearLayout parent,String title,boolean initiallyOpen){
     LinearLayout section=new LinearLayout(this);section.setOrientation(1);
     LinearLayout.LayoutParams sectionParams=new LinearLayout.LayoutParams(-1,-2);sectionParams.setMargins(0,14,0,0);parent.addView(section,sectionParams);
@@ -1323,6 +1363,7 @@ public class MainActivity extends Activity {
     section.addView(header);
     LinearLayout content=new LinearLayout(this);content.setOrientation(1);content.setPadding(0,10,0,4);
     section.addView(content);content.setVisibility(initiallyOpen?View.VISIBLE:View.GONE);
+    sectionHeaders.put(content,header);sectionTitles.put(content,title);
     header.setOnClickListener(v->{boolean open=content.getVisibility()!=View.VISIBLE;content.setVisibility(open?View.VISIBLE:View.GONE);header.setText((open?"▾  ":"▸  ")+title);});
     return content;
   }
