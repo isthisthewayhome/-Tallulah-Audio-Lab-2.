@@ -533,7 +533,7 @@ public class MainActivity extends Activity {
     navAudio.setOnClickListener(v->jumpToSection(audioStudio));
     navHismith.setOnClickListener(v->jumpToSection(hismithGroup));
     navLights.setOnClickListener(v->jumpToSection(lightingGroup));
-    navSync.setOnClickListener(v->jumpToSection(syncGroup));
+    navSync.setOnClickListener(v->jumpToSection(lightingGroup,syncGroup));
     navAdvanced.setOnClickListener(v->jumpToSection(advancedGroup));
     Button homeLiveSync=button("⚡ START HISMITH + GOVEE LIVE SYNC");
     quickNav.addView(homeLiveSync,new LinearLayout.LayoutParams(-1,dp(58)));
@@ -1269,6 +1269,7 @@ public class MainActivity extends Activity {
     root.addView(homePage,3);root.addView(audioPage,4);root.addView(hismithPage,5);
     root.addView(lightingPage,6);root.addView(settingsPage,7);
     root.removeView(quickNav);homePage.addView(quickNav);
+    quickNav.addView(text("Use the tabs below to switch between dedicated pages.",12,false));
     moveToPage(audioStudio,audioPage);
     moveToPage(soundGenerators,audioPage);
     moveToPage(hismithGroup,hismithPage);
