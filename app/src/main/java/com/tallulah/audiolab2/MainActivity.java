@@ -1260,6 +1260,43 @@ public class MainActivity extends Activity {
     });
     lights.addView(text("Flashing lights may trigger seizures or migraines. Stop immediately if uncomfortable. No automatic color changes.",12,false));
     TextView foot=text("Govee LAN controls are in testing. Keep using Govee Home if discovery fails.",13,false);foot.setTextColor(0xffb7a5be);foot.setPadding(0,28,0,0);root.addView(foot);
+    // Five-page navigation: move existing live controls, never recreate them.
+    LinearLayout homePage=new LinearLayout(this);homePage.setOrientation(1);
+    LinearLayout audioPage=new LinearLayout(this);audioPage.setOrientation(1);
+    LinearLayout hismithPage=new LinearLayout(this);hismithPage.setOrientation(1);
+    LinearLayout lightingPage=new LinearLayout(this);lightingPage.setOrientation(1);
+    LinearLayout settingsPage=new LinearLayout(this);settingsPage.setOrientation(1);
+    root.addView(homePage,3);root.addView(audioPage,4);root.addView(hismithPage,5);
+    root.addView(lightingPage,6);root.addView(settingsPage,7);
+    root.removeView(quickNav);homePage.addView(quickNav);
+    moveToPage(audioStudio,audioPage);
+    moveToPage(soundGenerators,audioPage);
+    moveToPage(hismithGroup,hismithPage);
+    moveToPage(lightingGroup,lightingPage);
+    moveToPage(syncGroup,lightingPage);
+    moveToPage(advancedGroup,settingsPage);
+    root.removeView(status);audioPage.addView(status);
+    root.removeView(foot);settingsPage.addView(foot);
+    mainPages=new LinearLayout[]{homePage,audioPage,hismithPage,lightingPage,settingsPage};
+    pageSections=new LinearLayout[]{null,audioStudio,hismithGroup,lightingGroup,advancedGroup};
+    // Replace the old scrolling root with a fixed bottom bar and fixed emergency action.
+    LinearLayout appShell=new LinearLayout(this);appShell.setOrientation(1);appShell.setBackgroundColor(bg);
+    android.view.ViewGroup oldScrollParent=(android.view.ViewGroup)scroll.getParent();
+    if(oldScrollParent!=null)oldScrollParent.removeView(scroll);
+    setContentView(appShell);
+    appShell.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+    LinearLayout bottomBar=new LinearLayout(this);bottomBar.setOrientation(0);appShell.addView(bottomBar,new LinearLayout.LayoutParams(-1,dp(54)));
+    String[] tabs={"⌂ Home","♫ Audio","⚡ Hismith","✦ Lights","⚙ Settings"};
+    for(int i=0;i<tabs.length;i++){
+      final int target=i;Button tab=button(tabs[i]);tab.setTextSize(11);
+      bottomBar.addView(tab,new LinearLayout.LayoutParams(0,-1,1));
+      tab.setOnClickListener(v->showMainPage(target));
+    }
+    root.removeView(emergencyAll);
+    appShell.addView(emergencyAll,new LinearLayout.LayoutParams(-1,dp(56)));
+    // The existing emergency handler remains attached to the same button.
+    showMainPage(0);
+
   }
   private ArrayList<String> selectedGoveeTargets(ArrayList<String> ips,int selected){
     ArrayList<String> targets=new ArrayList<>();
@@ -1366,9 +1403,26 @@ public class MainActivity extends Activity {
     }).start();
   }
   private ScrollView homeScroll;
+  private LinearLayout[] mainPages;
+  private LinearLayout[] pageSections;
+  private int selectedMainPage=0;
+  private void showMainPage(int page){
+    if(mainPages==null||page<0||page>=mainPages.length)return;
+    selectedMainPage=page;
+    for(int i=0;i<mainPages.length;i++)mainPages[i].setVisibility(i==page?View.VISIBLE:View.GONE);
+    if(homeScroll!=null)homeScroll.post(()->homeScroll.scrollTo(0,0));
+  }
+  private void moveToPage(LinearLayout content,LinearLayout destination){
+    View wrapper=(View)content.getParent();
+    android.view.ViewGroup old=(android.view.ViewGroup)wrapper.getParent();
+    old.removeView(wrapper);
+    destination.addView(wrapper);
+  }
+
   private final java.util.HashMap<LinearLayout,TextView> sectionHeaders=new java.util.HashMap<>();
   private final java.util.HashMap<LinearLayout,String> sectionTitles=new java.util.HashMap<>();
   private void jumpToSection(LinearLayout... path){
+    if(pageSections!=null&&path.length>0){for(int i=0;i<pageSections.length;i++)if(pageSections[i]==path[0]){showMainPage(i);break;}}
     for(LinearLayout content:path){
       TextView header=sectionHeaders.get(content);
       if(header!=null&&content.getVisibility()!=View.VISIBLE){
