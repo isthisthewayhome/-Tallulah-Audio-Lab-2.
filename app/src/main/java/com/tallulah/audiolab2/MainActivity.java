@@ -42,6 +42,40 @@ public class MainActivity extends Activity {
   private final java.util.HashSet<String> hismithSeen=new java.util.HashSet<>();
   private final Handler hismithBleHandler=new Handler(Looper.getMainLooper());
   private boolean hismithScanning=false;
+  private ArrayList<String> hismithLightTargetsSource;
+  private final Handler hismithLightHandler=new Handler(Looper.getMainLooper());
+  private final ArrayList<String> hismithLightTargets=new ArrayList<>();
+  private boolean hismithLightSyncActive=false;
+  private boolean hismithLightHigh=false;
+  private int hismithLightOffsetMs=0;
+  private TextView hismithLightSyncStatus;
+  private long hismithLightNextTick=0;
+  private final Runnable hismithLightTick=new Runnable(){
+    @Override public void run(){
+      if(!hismithLightSyncActive)return;
+      if(!hismithMonitorActive||hismithReportedSetting<1||hismithLightTargets.isEmpty()){
+        stopHismithLightSync();
+        if(hismithLightSyncStatus!=null)hismithLightSyncStatus.setText("Sync paused: no valid Bluetooth speed or lights.");
+        return;
+      }
+      // One measured reference: setting 50 ~= 2.45 cycles/s. Linear scaling is provisional.
+      double bps=2.45*hismithReportedSetting/50.0;
+      long halfCycle=Math.max(110,Math.round(500.0/bps));
+      hismithLightHigh=!hismithLightHigh;
+      sendGoveeCommand(new ArrayList<>(hismithLightTargets),"brightness",hismithLightHigh?60:15,null);
+      if(hismithLightSyncStatus!=null)hismithLightSyncStatus.setText(
+        String.format(java.util.Locale.US,"Live Sync ON • setting %d • estimated %.2f BPS • offset %+d ms • provisional timing",
+          hismithReportedSetting,bps,hismithLightOffsetMs));
+      hismithLightNextTick+=halfCycle;
+      hismithLightHandler.postDelayed(this,Math.max(10,hismithLightNextTick-android.os.SystemClock.uptimeMillis()));
+    }
+  };
+  private void stopHismithLightSync(){
+    hismithLightSyncActive=false;
+    hismithLightHandler.removeCallbacks(hismithLightTick);
+    hismithLightTargets.clear();
+    if(hismithLightSyncStatus!=null)hismithLightSyncStatus.setText("Live Sync OFF");
+  }
   private TextView hismithLiveStatus;
   private TextView hismithCandidateStatus;
   private TextView hismithDashboard;
@@ -125,6 +159,7 @@ public class MainActivity extends Activity {
     hismithScanning=false;
   }
   private void closeHismithGatt(){
+    stopHismithLightSync();
     hismithMonitorActive=false;hismithNotifyQueue.clear();
     if(hismithGatt!=null){try{hismithGatt.disconnect();hismithGatt.close();}catch(Exception ignored){}hismithGatt=null;}
   }
@@ -535,6 +570,31 @@ public class MainActivity extends Activity {
     Button clearCalibration=button("Clear calibration");speedDashboard.addView(clearCalibration);
     clearCalibration.setOnClickListener(v->{hismithCalibrationSetting=-1;hismithCalibrationBps=0;renderHismithDashboard();});
     hismithCandidateStatus=text("Candidate speed: waiting for AA 03 packets (unverified)",15,true);bluetoothDiagnostics.addView(hismithCandidateStatus);
+    LinearLayout goveeSyncPanel=collapsibleSection(bluetoothDiagnostics,"Hismith → Govee Live Sync (Test)",false);
+    goveeSyncPanel.addView(text("Uses the measured speed-50 reference (2.45 BPS) with provisional proportional scaling. Pulses all discovered lights between 15% and 60% brightness. Bluetooth/Wi-Fi latency can cause drift; this is not motion-locked.",12,false));
+    hismithLightSyncStatus=text("Live Sync OFF",13,true);goveeSyncPanel.addView(hismithLightSyncStatus);
+    goveeSyncPanel.addView(text("Timing offset • -500 ms to +500 ms",12,false));
+    SeekBar syncOffset=new SeekBar(this);syncOffset.setMax(100);syncOffset.setProgress(50);goveeSyncPanel.addView(syncOffset);
+    TextView offsetReadout=text("Offset: 0 ms",12,false);goveeSyncPanel.addView(offsetReadout);
+    syncOffset.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+      public void onProgressChanged(SeekBar b,int p,boolean user){hismithLightOffsetMs=(p-50)*10;offsetReadout.setText("Offset: "+hismithLightOffsetMs+" ms");}
+      public void onStartTrackingTouch(SeekBar b){}
+      public void onStopTrackingTouch(SeekBar b){}
+    });
+    Button syncStart=button("Start Hismith → Govee Sync");goveeSyncPanel.addView(syncStart);
+    syncStart.setOnClickListener(v->{
+      if(!hismithMonitorActive||hismithReportedSetting<1){hismithLightSyncStatus.setText("Start the Bluetooth live monitor and receive a nonzero setting first.");return;}
+      if(hismithLightTargetsSource==null||hismithLightTargetsSource.isEmpty()){hismithLightSyncStatus.setText("Find Govee lights first.");return;}
+      stopReactive();stopGoveeFlow();stopGoveeStrobe();stopHismithLightSync();
+      hismithLightTargets.addAll(hismithLightTargetsSource);
+      hismithLightSyncActive=true;hismithLightHigh=false;
+      sendGoveeCommand(new ArrayList<>(hismithLightTargets),"turn",1,null);
+      hismithLightNextTick=android.os.SystemClock.uptimeMillis()+Math.max(0,hismithLightOffsetMs);
+      hismithLightHandler.postDelayed(hismithLightTick,Math.max(0,hismithLightOffsetMs));
+    });
+    Button syncStop=button("Stop Hismith → Govee Sync");goveeSyncPanel.addView(syncStop);
+    syncStop.setOnClickListener(v->{ArrayList<String> targets=new ArrayList<>(hismithLightTargets);stopHismithLightSync();if(!targets.isEmpty())sendGoveeCommand(targets,"brightness",50,null);});
+
     bluetoothDiagnostics.addView(text("Diagnostic only. Candidate byte is NOT verified motor speed. Compare with the original controller; keep the physical stop accessible.",12,false));
     hismithHistoryStatus=text("Recent BLE messages: none",12,false);bluetoothDiagnostics.addView(hismithHistoryStatus);
     Button clearBleHistory=button("Clear message history");bluetoothDiagnostics.addView(clearBleHistory);
@@ -886,6 +946,7 @@ public class MainActivity extends Activity {
     ArrayAdapter<String> lightAdapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,lightNames);
     lightPicker.setAdapter(lightAdapter);
     ArrayList<String> lightIps=new ArrayList<>();
+    hismithLightTargetsSource=lightIps;
     LinearLayout reactiveSection=collapsibleSection(syncGroup,"Audio-Reactive Effects",false);
     reactiveSection.addView(text("Start Audio Detection first. All four discovered lights will react together, regardless of the light selector.",13,false));
     reactiveSection.addView(text("Reaction speed • Smooth                         Responsive",13,false));
@@ -1003,6 +1064,7 @@ public class MainActivity extends Activity {
     emergencyAll.setOnClickListener(v->{
       if(lightIps.isEmpty()){lightStatus.setText("Discover your lights first.");return;}
       // Emergency override: disable every automatic lighting controller first.
+      stopHismithLightSync();
       stopReactive();
       stopGoveeFlow();
       stopGoveeStrobe();
@@ -1782,5 +1844,5 @@ public class MainActivity extends Activity {
     if(rhythmTone==null)return;
     try{rhythmTone.pause();rhythmTone.setPlaybackHeadPosition(0);rhythmTone.play();}catch(Exception ignored){}
   }
-  @Override protected void onDestroy(){stopHismithScan();closeHismithGatt();stopReactive();levelTestActive=false;levelHandler.removeCallbacks(levelMonitor);releaseLevelVisualizer();clipHandler.removeCallbacks(clipMonitor);atmosphereOn=false;stereoOn=false;rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
+  @Override protected void onDestroy(){stopHismithLightSync();stopHismithScan();closeHismithGatt();stopReactive();levelTestActive=false;levelHandler.removeCallbacks(levelMonitor);releaseLevelVisualizer();clipHandler.removeCallbacks(clipMonitor);atmosphereOn=false;stereoOn=false;rhythmEnabled=false;rhythmHandler.removeCallbacks(rhythmTask);if(rhythmTone!=null){rhythmTone.release();rhythmTone=null;}for(Track t:tracks)t.player.release();tracks.clear();super.onDestroy();}
 }
