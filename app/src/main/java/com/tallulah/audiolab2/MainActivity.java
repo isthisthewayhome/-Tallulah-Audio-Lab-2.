@@ -70,6 +70,17 @@ public class MainActivity extends Activity {
       hismithLightHandler.postDelayed(this,Math.max(10,hismithLightNextTick-android.os.SystemClock.uptimeMillis()));
     }
   };
+  private void startHismithGoveeSync(){
+      if(!hismithMonitorActive||hismithReportedSetting<1){hismithLightSyncStatus.setText("Start the Bluetooth live monitor and receive a nonzero setting first.");return;}
+      if(hismithLightTargetsSource==null||hismithLightTargetsSource.isEmpty()){hismithLightSyncStatus.setText("Find Govee lights first.");return;}
+      stopReactive();stopGoveeFlow();stopGoveeStrobe();stopHismithLightSync();
+      hismithLightTargets.addAll(hismithLightTargetsSource);
+      hismithLightSyncActive=true;hismithLightHigh=false;
+      sendGoveeCommand(new ArrayList<>(hismithLightTargets),"turn",1,null);
+      hismithLightNextTick=android.os.SystemClock.uptimeMillis()+Math.max(0,hismithLightOffsetMs);
+      hismithLightHandler.postDelayed(hismithLightTick,Math.max(0,hismithLightOffsetMs));
+    
+  }
   private void stopHismithLightSync(){
     hismithLightSyncActive=false;
     hismithLightHandler.removeCallbacks(hismithLightTick);
@@ -524,6 +535,34 @@ public class MainActivity extends Activity {
     navLights.setOnClickListener(v->jumpToSection(lightingGroup));
     navSync.setOnClickListener(v->jumpToSection(syncGroup));
     navAdvanced.setOnClickListener(v->jumpToSection(advancedGroup));
+    Button homeLiveSync=button("⚡ START HISMITH + GOVEE LIVE SYNC");
+    quickNav.addView(homeLiveSync,new LinearLayout.LayoutParams(-1,dp(58)));
+    TextView homeSyncStatus=text("Connect Hismith and discover Govee lights once, then start here.",12,false);quickNav.addView(homeSyncStatus);
+    homeLiveSync.setOnClickListener(v->{
+      if(hismithLightSyncActive){
+        ArrayList<String> targets=new ArrayList<>(hismithLightTargets);
+        stopHismithLightSync();
+        if(!targets.isEmpty())sendGoveeCommand(targets,"brightness",50,null);
+        homeLiveSync.setText("⚡ START HISMITH + GOVEE LIVE SYNC");
+        homeSyncStatus.setText("Sync stopped.");
+        return;
+      }
+      if(!hismithMonitorActive||hismithReportedSetting<1){
+        homeSyncStatus.setText("Connect HISMITH and start its Bluetooth monitor first.");
+        jumpToSection(hismithGroup,rhythmSection,bluetoothDiagnostics);
+        return;
+      }
+      if(hismithLightTargetsSource==null||hismithLightTargetsSource.isEmpty()){
+        homeSyncStatus.setText("Find Govee lights first.");
+        jumpToSection(lightingGroup);
+        return;
+      }
+      startHismithGoveeSync();
+      if(hismithLightSyncActive){
+        homeLiveSync.setText("■ STOP HISMITH + GOVEE LIVE SYNC");
+        homeSyncStatus.setText("Sync active • Emergency All On still overrides lighting.");
+      }
+    });
     LinearLayout masterSection=collapsibleSection(audioStudio,"Master transport",true);
     Button add=button("＋ Add audio");
     add.setOnClickListener(v->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("audio/*");i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);startActivityForResult(i,PICK_AUDIO);});
@@ -602,16 +641,7 @@ public class MainActivity extends Activity {
       public void onStopTrackingTouch(SeekBar b){}
     });
     Button syncStart=button("Start Hismith → Govee Sync");goveeSyncPanel.addView(syncStart);
-    syncStart.setOnClickListener(v->{
-      if(!hismithMonitorActive||hismithReportedSetting<1){hismithLightSyncStatus.setText("Start the Bluetooth live monitor and receive a nonzero setting first.");return;}
-      if(hismithLightTargetsSource==null||hismithLightTargetsSource.isEmpty()){hismithLightSyncStatus.setText("Find Govee lights first.");return;}
-      stopReactive();stopGoveeFlow();stopGoveeStrobe();stopHismithLightSync();
-      hismithLightTargets.addAll(hismithLightTargetsSource);
-      hismithLightSyncActive=true;hismithLightHigh=false;
-      sendGoveeCommand(new ArrayList<>(hismithLightTargets),"turn",1,null);
-      hismithLightNextTick=android.os.SystemClock.uptimeMillis()+Math.max(0,hismithLightOffsetMs);
-      hismithLightHandler.postDelayed(hismithLightTick,Math.max(0,hismithLightOffsetMs));
-    });
+    syncStart.setOnClickListener(v->startHismithGoveeSync());
     Button syncStop=button("Stop Hismith → Govee Sync");goveeSyncPanel.addView(syncStop);
     syncStop.setOnClickListener(v->{ArrayList<String> targets=new ArrayList<>(hismithLightTargets);stopHismithLightSync();if(!targets.isEmpty())sendGoveeCommand(targets,"brightness",50,null);});
 
