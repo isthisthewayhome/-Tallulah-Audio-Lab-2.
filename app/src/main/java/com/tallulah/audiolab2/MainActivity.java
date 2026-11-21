@@ -538,31 +538,6 @@ public class MainActivity extends Activity {
     Button homeLiveSync=button("⚡ START HISMITH + GOVEE LIVE SYNC");
     quickNav.addView(homeLiveSync,new LinearLayout.LayoutParams(-1,dp(58)));
     TextView homeSyncStatus=text("Connect Hismith and discover Govee lights once, then start here.",12,false);quickNav.addView(homeSyncStatus);
-    homeLiveSync.setOnClickListener(v->{
-      if(hismithLightSyncActive){
-        ArrayList<String> targets=new ArrayList<>(hismithLightTargets);
-        stopHismithLightSync();
-        if(!targets.isEmpty())sendGoveeCommand(targets,"brightness",50,null);
-        homeLiveSync.setText("⚡ START HISMITH + GOVEE LIVE SYNC");
-        homeSyncStatus.setText("Sync stopped.");
-        return;
-      }
-      if(!hismithMonitorActive||hismithReportedSetting<1){
-        homeSyncStatus.setText("Connect HISMITH and start its Bluetooth monitor first.");
-        jumpToSection(hismithGroup,rhythmSection,bluetoothDiagnostics);
-        return;
-      }
-      if(hismithLightTargetsSource==null||hismithLightTargetsSource.isEmpty()){
-        homeSyncStatus.setText("Find Govee lights first.");
-        jumpToSection(lightingGroup);
-        return;
-      }
-      startHismithGoveeSync();
-      if(hismithLightSyncActive){
-        homeLiveSync.setText("■ STOP HISMITH + GOVEE LIVE SYNC");
-        homeSyncStatus.setText("Sync active • Emergency All On still overrides lighting.");
-      }
-    });
     LinearLayout masterSection=collapsibleSection(audioStudio,"Master transport",true);
     Button add=button("＋ Add audio");
     add.setOnClickListener(v->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("audio/*");i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);startActivityForResult(i,PICK_AUDIO);});
@@ -596,6 +571,32 @@ public class MainActivity extends Activity {
     TextView rhythmHeading=text("HISMITH STROKE RHYTHM",18,true);rhythmHeading.setTextColor(0xffb497ff);rhythmCard.addView(rhythmHeading);
     TextView rhythmDesc=text("Audible timing guide only. Does not connect to or control a device.",13,false);rhythmCard.addView(rhythmDesc);
     LinearLayout bluetoothDiagnostics=collapsibleSection(rhythmSection,"Bluetooth Diagnostics • Read Only",false);
+    homeLiveSync.setOnClickListener(v->{
+      if(hismithLightSyncActive){
+        ArrayList<String> targets=new ArrayList<>(hismithLightTargets);
+        stopHismithLightSync();
+        if(!targets.isEmpty())sendGoveeCommand(targets,"brightness",50,null);
+        homeLiveSync.setText("⚡ START HISMITH + GOVEE LIVE SYNC");
+        homeSyncStatus.setText("Sync stopped.");
+        return;
+      }
+      if(!hismithMonitorActive||hismithReportedSetting<1){
+        homeSyncStatus.setText("Connect HISMITH and start its Bluetooth monitor first.");
+        jumpToSection(hismithGroup,rhythmSection,bluetoothDiagnostics);
+        return;
+      }
+      if(hismithLightTargetsSource==null||hismithLightTargetsSource.isEmpty()){
+        homeSyncStatus.setText("Find Govee lights first.");
+        jumpToSection(lightingGroup);
+        return;
+      }
+      startHismithGoveeSync();
+      if(hismithLightSyncActive){
+        homeLiveSync.setText("■ STOP HISMITH + GOVEE LIVE SYNC");
+        homeSyncStatus.setText("Sync active • Emergency All On still overrides lighting.");
+      }
+    });
+
     bluetoothDiagnostics.addView(text("Scan for nearby BLE devices. Tap a result to inspect service UUIDs and properties. No speed or motor commands are sent. The Hismith app may need to disconnect first.",13,false));
     hismithBleStatus=text("Not scanned. Keep the wired motor stop accessible.",13,false);
     bluetoothDiagnostics.addView(hismithBleStatus);
