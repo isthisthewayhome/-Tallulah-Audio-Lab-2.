@@ -1108,7 +1108,9 @@ public class MainActivity extends Activity {
     lightButtons.addView(lightsOff,new LinearLayout.LayoutParams(0,dp(58),1));
     lightsOn.setOnClickListener(v->sendGoveePower(lightIps,lightPicker.getSelectedItemPosition(),true,lightStatus));
     lightsOff.setOnClickListener(v->sendGoveePower(lightIps,lightPicker.getSelectedItemPosition(),false,lightStatus));
-    Button emergencyAll=button("EMERGENCY • ALL ON • 1%");
+    Button emergencyAll=button("EMERGENCY LIGHTING • ALL ON • 1%");
+    emergencyAll.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xffc62828));
+    emergencyAll.setTextColor(android.graphics.Color.WHITE);
     root.addView(emergencyAll,3);
     emergencyAll.setContentDescription("Emergency all lights on. Stop lighting effects and set warm white to one percent brightness.");
     lights.addView(text("Requests 1000K warm white at 1% on all discovered lights. Actual color temperature depends on H801D firmware limits.",12,false));
