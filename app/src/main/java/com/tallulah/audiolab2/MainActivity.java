@@ -269,6 +269,7 @@ public class MainActivity extends Activity {
   }
 
   private static final int PICK_AUDIO = 51;
+  private static final int PICK_VIDEO_AUDIO = 52;
   private final ArrayList<Track> tracks = new ArrayList<>();
   private LinearLayout trackList;
   private TextView status;
@@ -569,7 +570,7 @@ public class MainActivity extends Activity {
     status=text("Ready to import audio",14,false);status.setTextColor(0xffcbb5d5);status.setPadding(0,16,0,14);root.addView(status);
     LinearLayout audioSection=collapsibleSection(audioStudio,"Audio layers",false);
     audioSection.addView(add);
-    Button video=button("▣ Extract audio from video");audioSection.addView(video);video.setOnClickListener(v->status.setText("Video extraction is not available in this build yet."));
+    Button video=button("▣ Extract audio from video");audioSection.addView(video);video.setOnClickListener(v->{Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT);pick.addCategory(Intent.CATEGORY_OPENABLE);pick.setType("video/*");startActivityForResult(pick,PICK_VIDEO_AUDIO);});
     trackList=new LinearLayout(this);trackList.setOrientation(1);audioSection.addView(trackList);
     LinearLayout rhythmSection=collapsibleSection(hismithGroup,"Hismith rhythm guide",false);
     LinearLayout rhythmCard=new LinearLayout(this);rhythmCard.setOrientation(1);rhythmCard.setPadding(20,20,20,20);
@@ -1466,9 +1467,74 @@ public class MainActivity extends Activity {
   private Button button(String s){Button b=new Button(this);b.setText(s);b.setTextColor(Color.WHITE);b.setAllCaps(false);b.setTextSize(13);b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff5b346c));return b;}
   @Override protected void onActivityResult(int request,int result,Intent data){
     super.onActivityResult(request,result,data);
+    if(request==PICK_VIDEO_AUDIO){if(result==RESULT_OK&&data!=null&&data.getData()!=null)extractAudioFromVideo(data.getData());return;}
     if(request!=PICK_AUDIO||result!=RESULT_OK||data==null)return;
     if(data.getClipData()!=null){for(int i=0;i<data.getClipData().getItemCount();i++)load(data.getClipData().getItemAt(i).getUri());}
     else if(data.getData()!=null)load(data.getData());
+  }
+  private void extractAudioFromVideo(Uri videoUri){
+    status.setText("Extracting audio from video…");
+    android.widget.Toast.makeText(this,"Extracting audio…",android.widget.Toast.LENGTH_SHORT).show();
+    new Thread(()->{
+      MediaExtractor extractor=new MediaExtractor();
+      android.media.MediaMuxer muxer=null;
+      File output=null;boolean started=false;boolean completed=false;
+      try{
+        extractor.setDataSource(this,videoUri,null);
+        int audioIndex=-1;MediaFormat audioFormat=null;
+        for(int i=0;i<extractor.getTrackCount();i++){
+          MediaFormat fmt=extractor.getTrackFormat(i);
+          String mime=fmt.getString(MediaFormat.KEY_MIME);
+          if(mime!=null&&mime.startsWith("audio/")){audioIndex=i;audioFormat=fmt;break;}
+        }
+        if(audioIndex<0)throw new Exception("This video has no audio track.");
+        String mime=audioFormat.getString(MediaFormat.KEY_MIME);
+        if(!("audio/mp4a-latm".equals(mime)||"audio/3gpp".equals(mime)||"audio/amr-wb".equals(mime)))
+          throw new Exception("Unsupported embedded audio format: "+mime+". Try an MP4 video with AAC audio.");
+        File folder=new File(getFilesDir(),"extracted_audio");
+        if(!folder.exists()&&!folder.mkdirs())throw new Exception("Cannot create audio folder.");
+        output=new File(folder,"Video_Audio_"+System.currentTimeMillis()+".m4a");
+        muxer=new android.media.MediaMuxer(output.getAbsolutePath(),android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+        int destinationTrack=muxer.addTrack(audioFormat);
+        extractor.selectTrack(audioIndex);
+        muxer.start();started=true;
+        int max=audioFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)?audioFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE):262144;
+        ByteBuffer buffer=ByteBuffer.allocateDirect(Math.max(262144,max));
+        MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
+        long firstTime=-1;long lastTime=-1;int samples=0;
+        while(true){
+          buffer.clear();
+          int size=extractor.readSampleData(buffer,0);
+          if(size<0)break;
+          long time=extractor.getSampleTime();
+          if(firstTime<0)firstTime=time;
+          info.offset=0;info.size=size;info.presentationTimeUs=Math.max(0,time-firstTime);
+          if(lastTime>=0&&info.presentationTimeUs<=lastTime)info.presentationTimeUs=lastTime+1;
+          lastTime=info.presentationTimeUs;
+          info.flags=extractor.getSampleFlags()&MediaExtractor.SAMPLE_FLAG_SYNC;
+          muxer.writeSampleData(destinationTrack,buffer,info);
+          samples++;extractor.advance();
+        }
+        if(samples==0)throw new Exception("No audio samples found.");
+        muxer.stop();started=false;muxer.release();muxer=null;
+        completed=true;
+        File finished=output;
+        runOnUiThread(()->{
+          load(Uri.fromFile(finished));
+          status.setText("Extracted audio added as a layer. File: "+finished.getName());
+          android.widget.Toast.makeText(this,"Video audio added to layers",android.widget.Toast.LENGTH_LONG).show();
+        });
+      }catch(Exception e){
+        String message=e.getMessage();
+        runOnUiThread(()->new android.app.AlertDialog.Builder(this).setTitle("Video audio extraction failed")
+          .setMessage(message==null?"Unable to extract audio from this video.":message)
+          .setPositiveButton("OK",null).show());
+      }finally{
+        if(muxer!=null){if(started)try{muxer.stop();}catch(Exception ignored){}try{muxer.release();}catch(Exception ignored){}}
+        extractor.release();
+        if(!completed&&output!=null)output.delete();
+      }
+    },"VideoAudioExtraction").start();
   }
   private void load(Uri uri){
     try{
