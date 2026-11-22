@@ -1500,6 +1500,22 @@ public class MainActivity extends Activity {
         public void onStartTrackingTouch(SeekBar b){t.draggingProgress=true;}
         public void onStopTrackingTouch(SeekBar b){int length=Math.max(0,t.trimEndMs-t.trimStartMs);try{player.seekTo(t.trimStartMs+Math.min(b.getProgress(),length));}catch(Exception ignored){}t.draggingProgress=false;updateTrackProgress();}
       });
+      Button placeClip=button("↔ Place clip at exact time");card.addView(placeClip);
+      placeClip.setOnClickListener(v->showClipPlacementEditor(t,startAt));
+      Button duplicateClip=button("⧉ Duplicate clip");card.addView(duplicateClip);
+      duplicateClip.setOnClickListener(v->{
+        int count=tracks.size();
+        load(t.uri);
+        if(tracks.size()<=count)return;
+        Track copy=tracks.get(tracks.size()-1);
+        copy.trimStartMs=t.trimStartMs;copy.trimEndMs=t.trimEndMs;
+        copy.fadeInMs=t.fadeInMs;copy.fadeOutMs=t.fadeOutMs;
+        copy.startAtMs=t.startAtMs+Math.max(0,t.trimEndMs-t.trimStartMs);
+        copy.volume.setProgress(t.volume.getProgress());
+        copy.startLabel.setText("Start at: "+clock(copy.startAtMs));
+        updateMasterTimeline();
+        status.setText("Clip duplicated. Use Place clip at exact time to position it.");
+      });
       Button clipEdit=button("✂ Trim clip");card.addView(clipEdit);clipEdit.setOnClickListener(v->showTrimEditor(t));
       Button fades=button("◐ Fade in / Fade out");card.addView(fades);fades.setOnClickListener(v->showFadeEditor(t));
       TextView speedLabel=text("Speed 1.00×",13,false);card.addView(speedLabel);
@@ -1508,6 +1524,31 @@ public class MainActivity extends Activity {
       Button remove=button("✕");row.addView(remove);remove.setOnClickListener(v->{player.release();tracks.remove(t);trackList.removeView(card);status.setText("Track removed");});
       status.setText("Imported "+tracks.size()+" track(s)");
     }catch(Exception e){status.setText("Could not open audio: "+e.getMessage());}
+  }
+  private void showClipPlacementEditor(Track t,SeekBar startBar){
+    LinearLayout layout=new LinearLayout(this);layout.setOrientation(1);layout.setPadding(32,16,32,12);
+    layout.addView(text("Insert this clip on the mix timeline. Enter minutes and seconds; other layers remain in place.",14,false));
+    EditText minutes=new EditText(this);minutes.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+    minutes.setHint("Minutes");minutes.setText(String.valueOf(t.startAtMs/60000));layout.addView(minutes);
+    EditText seconds=new EditText(this);seconds.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+    seconds.setHint("Seconds (0–59.999)");seconds.setText(String.format(java.util.Locale.US,"%.3f",(t.startAtMs%60000)/1000.0));layout.addView(seconds);
+    new android.app.AlertDialog.Builder(this).setTitle("Place clip on timeline").setView(layout)
+      .setNegativeButton("Cancel",null).setPositiveButton("Place clip",(dialog,which)->{
+        try{
+          long m=Long.parseLong(minutes.getText().toString().trim());
+          double sec=Double.parseDouble(seconds.getText().toString().trim());
+          if(m<0||sec<0||sec>=60||m>100000)throw new IllegalArgumentException();
+          long target=m*60000L+Math.round(sec*1000);
+          if(target>Integer.MAX_VALUE)throw new IllegalArgumentException();
+          t.startAtMs=(int)target;
+          startBar.setMax(Math.max(600000,t.startAtMs));
+          startBar.setProgress(t.startAtMs);
+          t.startLabel.setText("Start at: "+clock(t.startAtMs));
+          if(playing)positionMix(mixPosition());
+          updateMasterTimeline();
+          status.setText("Clip placed at "+clock(t.startAtMs));
+        }catch(Exception e){status.setText("Invalid time. Use nonnegative minutes and seconds below 60.");}
+      }).show();
   }
   private void showFadeEditor(Track t){
     int duration=Math.max(1,t.trimEndMs-t.trimStartMs);
