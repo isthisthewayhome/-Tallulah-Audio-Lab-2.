@@ -559,7 +559,13 @@ public class MainActivity extends Activity {
     Button saveProject=button("💾 Save Project (instant)");masterSection.addView(saveProject);saveProject.setOnClickListener(v->saveProject());
     Button openProject=button("📂 My Projects");masterSection.addView(openProject);openProject.setOnClickListener(v->showProjects());
     Button saveMix=button("⬇ Export WAV audio");masterSection.addView(saveMix);
-    saveMix.setOnClickListener(v->saveEditedAudio());
+    saveMix.setOnClickListener(v->{
+      android.widget.Toast.makeText(this,"Export button tapped",android.widget.Toast.LENGTH_SHORT).show();
+      if(tracks.isEmpty()){new android.app.AlertDialog.Builder(this).setTitle("Nothing to export").setMessage("Import at least one audio clip first.").setPositiveButton("OK",null).show();return;}
+      if(tracks.size()>2){new android.app.AlertDialog.Builder(this).setTitle("Export not available yet").setMessage("This build currently exports only one or two layers. You have "+tracks.size()+". Your clips have not been changed.").setPositiveButton("OK",null).show();return;}
+      for(Track t:tracks){if(t.loop!=null&&t.loop.isChecked()){new android.app.AlertDialog.Builder(this).setTitle("Turn off looping").setMessage("Disable Loop on each clip before exporting.").setPositiveButton("OK",null).show();return;}}
+      new android.app.AlertDialog.Builder(this).setTitle("Export WAV audio").setMessage("Export "+tracks.size()+" layer(s) as a WAV file to Music/Tallulah Audio Lab? Rendering may take a while.").setNegativeButton("Cancel",null).setPositiveButton("Export",(d,w)->{android.widget.Toast.makeText(this,"Rendering WAV in background…",android.widget.Toast.LENGTH_LONG).show();saveEditedAudio();}).show();
+    });
     status=text("Ready to import audio",14,false);status.setTextColor(0xffcbb5d5);status.setPadding(0,16,0,14);root.addView(status);
     LinearLayout audioSection=collapsibleSection(audioStudio,"Audio layers",false);
     audioSection.addView(add);
@@ -1818,8 +1824,8 @@ public class MainActivity extends Activity {
         dest=getContentResolver().insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,values);if(dest==null)throw new Exception("Cannot create destination");
         try(InputStream in=new java.io.FileInputStream(temp);OutputStream out=getContentResolver().openOutputStream(dest)){if(out==null)throw new Exception("Cannot write destination");byte[] buf=new byte[32768];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);}
         values.clear();values.put(MediaStore.Audio.Media.IS_PENDING,0);getContentResolver().update(dest,values,null,null);
-        runOnUiThread(()->status.setText("Saved edited WAV to Music/Tallulah Audio Lab"));
-      }catch(Exception e){if(dest!=null)getContentResolver().delete(dest,null,null);String message=e.getMessage();runOnUiThread(()->status.setText("Export failed: "+message));}
+        runOnUiThread(()->{status.setText("Saved edited WAV to Music/Tallulah Audio Lab");android.widget.Toast.makeText(this,"WAV export saved to Music/Tallulah Audio Lab",android.widget.Toast.LENGTH_LONG).show();});
+      }catch(Exception e){if(dest!=null)getContentResolver().delete(dest,null,null);String message=e.getMessage();runOnUiThread(()->{status.setText("Export failed: "+message);new android.app.AlertDialog.Builder(this).setTitle("Audio export failed").setMessage(message==null?"Unknown error":message).setPositiveButton("OK",null).show();});}
       finally{if(wav!=null)try{wav.close();}catch(Exception ignored){}if(decoder!=null){try{decoder.stop();}catch(Exception ignored){}decoder.release();}if(extractor!=null)extractor.release();if(temp!=null)temp.delete();}
     },"AudioExport").start();
   }
